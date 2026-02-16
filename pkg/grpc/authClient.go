@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"log"
 
 	pb "github.com/JohnnyKahiu/speed_sales_proto/user"
 	"google.golang.org/grpc"
@@ -38,7 +37,7 @@ func (s *AuthService) ValidateUserToken(ctx context.Context, token string) (stri
 		return "", false
 	}
 
-	log.Printf("resp = %v,\n", resp.Rights)
+	// log.Printf("resp = %v,\n", resp.Rights)
 	// fmt.Printf("token = %v\n", token)
 
 	if !resp.Valid {
