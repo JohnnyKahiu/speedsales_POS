@@ -50,7 +50,7 @@ type User struct {
 	Produce              bool      `json:"produce" name:"produce" type:"field" sql:"BOOL NOT NULL DEFAULT 'FALSE'"`
 	TillOpened           time.Time `json:"till_opened" name:"till_opened" type:"field" sql:"TIMESTAMP "`
 	Till                 bool      `json:"till" name:"till" type:"field" sql:"BOOL NOT NULL DEFAULT 'FALSE'"`
-	TillNum              string    `json:"till_num" name:"till_num" type:"field" sql:"VARCHAR(50) "`
+	TillNum              int64     `json:"till_num" name:"till_num" type:"field" sql:"VARCHAR(50) "`
 	Device               string    `json:"device" name:"device" type:"field" sql:"VARCHAR(50)"`
 	Token                string    `json:"token" name:"token" type:"field" sql:"VARCHAR(150)"`
 	TokenDate            time.Time `json:"token_date" name:"token_date" type:"field" sql:"TIMESTAMP"`

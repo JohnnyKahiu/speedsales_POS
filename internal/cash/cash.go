@@ -51,7 +51,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		a.Poster = details.Username
 		a.Branch = details.Branch
 		a.CompanyID = details.CompanyID
-		a.TillNum, _ = strconv.ParseInt(details.TillNum, 10, 64)
+		a.TillNum = details.TillNum
 		a.SaleType = "Cash Sale"
 
 		receiptNum, err := a.GenReceipt()
@@ -89,7 +89,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			a.Poster = details.Username
 			a.Branch = details.Branch
 			a.CompanyID = details.CompanyID
-			a.TillNum, _ = strconv.ParseInt(details.TillNum, 10, 64)
+			a.TillNum = details.TillNum
 			a.SaleType = "Cash Sale"
 
 			receiptNum, _ = a.GenReceipt()
@@ -284,7 +284,15 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
-		// validate cart
+		// fetch receiptNum if not provided
+		if cart.ReceiptNum == 0 {
+			rcpt := sales.ReceiptLog{TillNum: details.TillNum, Poster: details.Username}
+			cart.ReceiptNum, err = rcpt.GenReceipt()
+			if err != nil {
+				return respMap
+			}
+		}
+
 		err = cart.AddCart()
 		if err != nil {
 			respMap["response"] = "error"

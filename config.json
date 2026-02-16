@@ -1,0 +1,36 @@
+{
+    "company_name": "mamawatoto",
+    "listen": "0.0.0.0",
+    "port":"8100",
+    "master_addr":"192.168.0.201",
+    "port2":"3031",
+    "mirror_addr":"192.168.0.201",
+    "mirror_port":"3313",
+    "server_name": "test_shack",
+    "server_id": 1,
+    "etr_socket": "127.0.0.1",
+    "etr_type": "none",
+    "production_disp":false,
+    "login": {
+      "server": "localhost",
+      "port": 5432,
+      "database": "ipos",
+      "user": "datarif",
+      "password": "kawera"
+    },
+    "back_up_loc": "/home/administrator/pos_backups",
+    "sc_server": "localhost",
+    "sc_port": 3333,
+    "stock_branch": "test",
+    "remote_servers": [
+        "http://localhost:8100",
+        "http://192.168.0.210:8100"
+    ],
+    "ha_cluster": [
+        {"name":"main_server_1", "ip_address":"192.168.0.2", "port":3331},
+        {"name":"main_server_2", "ip_address":"192.168.0.14", "port":3331}
+    ],
+    "server_branches": ["test"],
+    "master_url": "http://localhost:8900"
+  }
+  

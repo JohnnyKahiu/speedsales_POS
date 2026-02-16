@@ -2,9 +2,9 @@ package sales
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/JohnnyKahiu/speedsales/poserver/database"
@@ -48,7 +48,6 @@ var fetchUser = func(u *logins.Users, ctx context.Context) error {
 // writes through to cache
 // returns an error if fails
 func (arg *Sales) AddCart() error {
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -58,6 +57,16 @@ func (arg *Sales) AddCart() error {
 	if err != nil {
 		return err
 	}
+
+	// validate p
+	if p.ItemCode == "" {
+		return errors.New("item code is required")
+	}
+	if p.TillPrice == 0 {
+		return errors.New("item price is required")
+	}
+
+	// create a unique ReceiptItem for entry
 
 	log.Println("product details = ", p)
 
@@ -69,8 +78,6 @@ func (arg *ReceiptLog) CreateReceipt() (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	server := variables.ServerID
-
 	userDetails := logins.Users{Username: arg.Poster}
 	err := fetchUser(&userDetails, ctx)
 	if err != nil {
@@ -79,23 +86,23 @@ func (arg *ReceiptLog) CreateReceipt() (int64, error) {
 	fmt.Println("user_details =", userDetails)
 
 	if userDetails.AcceptPayment {
-		arg.PayTill, _ = strconv.ParseInt(userDetails.TillNum, 10, 64)
+		arg.PayTill = userDetails.TillNum
 	}
 
 	// prepare sql statement to get the next receipt number
 	sql := `SELECT CAST(CONCAT(
-						cast($2 as varchar)
+						cast(1 as varchar)
 						, extract(YEAR FROM now())
 						, LPAD(EXTRACT(MONTH FROM now())::text, 2, '0')
 						, LPAD(EXTRACT(DAY FROM now())::text, 2, '0')
-						, (SELECT CONCAT(company_id, branch_id) FROM branches WHERE branch_name = (SELECT branch FROM users WHERE username = $1)) 
+						, '0'
 						, cast(coalesce(max(daily_count), 0) + 1 as varchar) 
     				) AS BIGINT)
      			, coalesce(max(daily_count), 0) + 1
-			FROM salestrace WHERE trans_date::date = (SELECT now()::date) AND company_id = (SELECT coalesce(company_id, 0) FROM users WHERE username = $1) AND branch = (SELECT branch FROM users WHERE username = $1)
+			FROM salestrace WHERE trans_date::date = (SELECT now()::date)
 	`
 
-	rows, err := database.PgPool.Query(ctx, sql, arg.Poster, server)
+	rows, err := database.PgPool.Query(ctx, sql)
 	if err != nil {
 		log.Println("error. failed to get receipt     err =", err)
 		return 0, err
@@ -142,7 +149,7 @@ func (a *ReceiptLog) LogReceipt(ctx context.Context) error {
 }
 
 // CashInTill fetches and returns total cash in current till
-func CashInTill(till string) (float64, error) {
+func CashInTill(till int64) (float64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

@@ -131,7 +131,7 @@ type Users struct {
 
 	TillOpened time.Time `json:"till_opened" name:"till_opened" type:"field" sql:"TIMESTAMP "`
 	Till       bool      `json:"till" name:"till" type:"field" sql:"BOOL NOT NULL DEFAULT 'FALSE'"`
-	TillNum    string    `json:"till_num" name:"till_num" type:"field" sql:"VARCHAR(50) "`
+	TillNum    int64     `json:"till_num" name:"till_num" type:"field" sql:"BIGINT NOT NULL DEFAULT '0' "`
 	Device     string    `json:"device" name:"device" type:"field" sql:"VARCHAR(50)"`
 
 	Token     string    `json:"token" name:"token" type:"field" sql:"VARCHAR(150)"`
