@@ -265,6 +265,46 @@ func (arg *ReceiptLog) FetchRange() error {
 	return nil
 }
 
+func (arg *ReceiptLog) GetActiveCarts() ([]ReceiptLog, error) {
+	activeRcpts := []ReceiptLog{}
+
+	sql := `SELECT 
+				receipt_num
+				, daily_count
+				, state 
+				, coalesce(cart::varchar, '{}')
+				, trans_date
+			FROM salestrace
+			WHERE state in ('pending', 'paying', 'suspend') 
+			    AND till_num = $1 
+			GROUP BY receipt_num
+			ORDER BY trans_date ASC`
+
+	// Query database rows
+	rows, err := database.PgPool.Query(context.Background(), sql, arg.TillNum)
+	if err != nil {
+		log.Printf("operation error \n%v", err.Error())
+		return activeRcpts, err
+	}
+	defer rows.Close()
+
+	fmt.Println("active carts for till_num =", arg.TillNum)
+	for rows.Next() {
+		r := ReceiptLog{}
+		cart := ""
+
+		err := rows.Scan(&r.ReceiptNum, &r.DailyCount, &r.State, &cart, &r.TransDate)
+		if err != nil {
+			log.Println("error failed to scan receipt    err =", err)
+			return []ReceiptLog{}, err
+		}
+
+		activeRcpts = append(activeRcpts, r)
+	}
+
+	return activeRcpts, nil
+}
+
 func (arg *ReceiptLog) GetEmpty() (int, error) {
 	sql := `SELECT count(*) FROM salestrace WHERE receipt_num = $1 AND cart IS NULL`
 

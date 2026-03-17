@@ -66,7 +66,16 @@ func (arg *Sales) AddCart() error {
 		return errors.New("item price is required")
 	}
 
+	arg.TransDate = time.Now()
+	arg.Cost = p.ItemCost
+	arg.Total = arg.Quantity * arg.Price
+
+	arg.Vat = p.VatPercent * arg.Total / (100 + p.VatPercent)
+	arg.VatAlpha = p.VatAlpha
 	// create a unique ReceiptItem for entry
+	arg.ReceiptItem = fmt.Sprintf("%d", time.Now().UnixNano())
+
+	// add to in memory fileDB esp one in use
 
 	log.Println("product details = ", p)
 

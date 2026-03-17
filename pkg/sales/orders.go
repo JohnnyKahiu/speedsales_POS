@@ -74,14 +74,10 @@ func (ord *Order) NextOrder() error {
 				coalesce(max(order_num), 0) 
 			FROM salesorders 
 			WHERE state = 'pending' 
-				AND till_num::varchar = (
-					SELECT 
-						till_num::varchar 
-					FROM users 
-					WHERE username = $1 LIMIT 1)
-				AND receipt_num = $2`
+				AND till_num = $2
+				AND receipt_num = $3`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, ord.Poster, ord.ReceiptNum)
+	rows, err := db.PgPool.Query(context.Background(), sql, ord.Poster, ord.TillNum, ord.ReceiptNum)
 	if err != nil {
 		return err
 	}
@@ -98,7 +94,7 @@ func (ord *Order) NextOrder() error {
 }
 
 // NewOrder generates a new sales order
-func (ord *Order) NewOrder() error {
+func (ord *Order) NewOrder(ctx context.Context) error {
 	var err error
 	err = ord.NextOrder()
 	if err != nil {
@@ -140,7 +136,67 @@ func (ord *Order) NewOrder() error {
 				branch = (SELECT branch FROM users WHERE username = $1)
 			RETURNING order_num`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, ord.Poster, ord.AcNum, ord.ReceiptNum)
+	rows, err := db.PgPool.Query(ctx, sql, ord.Poster, ord.AcNum, ord.ReceiptNum)
+	if err != nil {
+		fmt.Println("sale.Orders->NewOrder() query error     err =", err)
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		err = rows.Scan(&ord.OrderNum)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// NewOrder generates a new sales order
+func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
+	var err error
+	err = ord.NextOrder()
+	if err != nil {
+		fmt.Println("error newOrder    err =", err)
+		return err
+	}
+
+	if ord.OrderNum > 0 {
+		return nil
+	}
+
+	if ord.Poster == "" {
+		return fmt.Errorf(("order error poster is null"))
+	}
+
+	if ord.AcNum == "" {
+		ord.AcNum = fmt.Sprintf("%v", ord.ReceiptNum)
+	}
+
+	// create a new order if there is no active order
+	sql := `INSERT INTO salesorders(order_num, daily_count, till_num, poster, branch, company_id, ac_num, receipt_num)
+			SELECT CAST(CONCAT(
+							extract(YEAR FROM now()), 
+							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'), 
+							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'), 
+							(SELECT CONCAT(coalesce(company_id, 0), coalesce(branch_id, 0)) FROM branches WHERE branch_name = $1) LIMIT 1), 
+							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar) 
+						) AS BIGINT) as order_num
+					, coalesce(max(daily_count), 0) + 1 as daily_count
+					, $2 as till_num
+					, $3 as poster
+					, (SELECT branch::varchar FROM users WHERE username = $1) as branch
+					, (SELECT company_id FROM users WHERE username = $1) as company_id
+					, $4
+					, $5
+				FROM salesorders 
+				WHERE trans_date::date = (SELECT now()::date) AND 
+				company_id = $6 AND 
+				branch = $1
+			RETURNING order_num`
+
+	rows, err := tx.Query(ctx, sql, ord.Branch, ord.TillNum, ord.Poster, ord.AcNum, ord.ReceiptNum, ord.CompanyID)
 	if err != nil {
 		fmt.Println("sale.Orders->NewOrder() query error     err =", err)
 		return err
@@ -160,12 +216,13 @@ func (ord *Order) NewOrder() error {
 // FetchOrderItems gets all items in order
 func (ord *Order) Fetchtems() error {
 	sql := `SELECT 
-				cast(coalesce(order_items, '[]') as varchar) 
+				cast(coalesce(order_items::varchar, '[]') as varchar) 
 			FROM salesorders 
 			WHERE order_num = $1`
 
 	rows, err := db.PgPool.Query(context.Background(), sql, ord.OrderNum)
 	if err != nil {
+		log.Println("sql error, failed to query order items    err =", err)
 		return err
 	}
 	defer rows.Close()
@@ -176,6 +233,51 @@ func (ord *Order) Fetchtems() error {
 		if err != nil {
 			return err
 		}
+	}
+
+	fmt.Println("")
+	if orderItems == "" {
+		fmt.Println("orderItems is empty")
+		ord.OrderItems = []Sales{}
+		return nil
+	}
+
+	err = json.Unmarshal([]byte(orderItems), &ord.OrderItems)
+	if err != nil {
+		log.Println("failed to unmarshal orderItems to json    err =", err)
+		return err
+	}
+
+	return nil
+}
+
+// FetchOrderItems gets all items in order
+func (ord *Order) FetchtemsTX(ctx context.Context, tx pgx.Tx) error {
+	sql := `SELECT 
+				cast(coalesce(order_items::varchar, '[]') as varchar) 
+			FROM salesorders 
+			WHERE order_num = $1`
+
+	rows, err := tx.Query(ctx, sql, ord.OrderNum)
+	if err != nil {
+		log.Println("sql error, failed to query order items    err =", err)
+		return err
+	}
+	defer rows.Close()
+
+	var orderItems string
+	for rows.Next() {
+		err := rows.Scan(&orderItems)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("")
+	if orderItems == "" {
+		fmt.Println("orderItems is empty")
+		ord.OrderItems = []Sales{}
+		return nil
 	}
 
 	err = json.Unmarshal([]byte(orderItems), &ord.OrderItems)
@@ -373,6 +475,9 @@ func FetchActiveOrdersInBill(receipt string) ([]Order, error) {
 
 // AddToOrder adds a new item to orders
 func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	if ord.ReceiptNum == 0 {
 		return nil, 0, fmt.Errorf("error. Order->AddToOrder()    null order num")
 	}
@@ -380,10 +485,24 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 		return nil, 0, fmt.Errorf("error. Order->AddToOrder()    null receipt")
 	}
 
-	// get order item
-	err := ord.Fetchtems()
+	tx, err := db.PgPool.Begin(ctx)
 	if err != nil {
-		fmt.Println("error fetching order items error =", err)
+		log.Println("error creating transaction error =", err)
+		return nil, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	// fetch order number from next available in bill
+	err = ord.NewOrderTX(ctx, tx)
+	if err != nil {
+		log.Println("error fetching order number error =", err)
+		return nil, 0, err
+	}
+
+	// get order item
+	err = ord.FetchtemsTX(ctx, tx)
+	if err != nil {
+		log.Println("error fetching order items error =", err)
 		return nil, 0, err
 	}
 
@@ -402,7 +521,6 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-
 	fmt.Println("order items =", orderItems)
 
 	// update order item
@@ -411,7 +529,7 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 				order_items = $1 
 			WHERE order_num = $2 
 			RETURNING cast(coalesce(order_items, '[]') as varchar)`
-	rows, err := db.PgPool.Query(context.Background(), sql, jStr, ord.OrderNum)
+	rows, err := tx.Query(ctx, sql, jStr, ord.OrderNum)
 	if err != nil {
 		fmt.Println("error fetching order items err =", err)
 		return nil, 0, err
@@ -432,6 +550,7 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 	}
 
 	total := OrderTotal(orderItems)
+	tx.Commit(ctx)
 
 	return orderItems, total, nil
 }
@@ -542,6 +661,41 @@ func (ord *Order) VoucherCtx(ctx context.Context, tx pgx.Tx) ([]OrderItem, error
 	}
 
 	return values, nil
+}
+
+// GetOrdersInBills
+func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
+	sql := `SELECT
+                order_num
+	            , daily_count
+				, poster 
+				, state
+				, ac_num
+				, receipt_num
+			FROM salesorders 
+			WHERE 
+				state IN ('pending', 'dispatched', 'paying') AND 
+				receipt_num = $1
+			ORDER BY trans_date ASC `
+
+	rows, err := database.PgPool.Query(ctx, sql, ord.ReceiptNum)
+	if err != nil {
+		log.Println("sql error failed to query salesorders    err =", err)
+		return []Order{}, err
+	}
+	defer rows.Close()
+
+	orders := []Order{}
+	for rows.Next() {
+		r := Order{}
+		err := rows.Scan(&r.OrderNum, &r.DailyCount, &r.Poster, &r.State, &r.AcNum, &r.ReceiptNum)
+		if err != nil {
+			log.Println("sql scan error    err =", err)
+			return []Order{}, err
+		}
+	}
+
+	return orders, nil
 }
 
 // OrderVoucher returns order details

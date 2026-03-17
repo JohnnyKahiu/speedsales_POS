@@ -18,30 +18,23 @@ import (
 )
 
 func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
-	// get token from headers
-	token := fmt.Sprintf("%v", r.Header.Get("token"))
-
 	respMap := make(map[string]interface{})
 
-	// return authentication error if token is empty
-	if token == "" {
+	userStr := r.Header.Get("user_details")
+	if userStr == "" {
 		respMap["response"] = "error"
-		respMap["message"] = "broken authentication"
+		respMap["message"] = "user details not found"
 		return respMap
 	}
-	// get token payload if authentic
-	details, authentic := logins.ValidateJWT(token)
 
-	if !authentic {
-		respMap["response"] = "authentication error"
-		respMap["message"] = "authentication error"
-		return respMap
-	}
+	details := logins.Users{}
+	json.Unmarshal([]byte(userStr), &details)
 
 	vars := mux.Vars(r)
-
 	m := vars["module"]
-	if m == "get-receipt" {
+
+	switch m {
+	case "get-receipt":
 		if !details.MakeSales {
 			respMap["response"] = "forbidden"
 			respMap["message"] = "forbidden"
@@ -67,17 +60,17 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["response"] = "success"
 		respMap["receipt"] = receiptNum
 		return respMap
-	}
-	if m == "cart" {
+
+	case "cart":
 		fmt.Println("\t  == timing get cart request ==")
 		start := time.Now()
 
 		if !details.MakeSales {
-
 			respMap["response"] = "forbidden"
 			respMap["message"] = "forbidden"
 			return respMap
 		}
+
 		fmt.Println("till num =", details.TillNum)
 
 		rcpt := r.URL.Query().Get("receipt")
@@ -132,9 +125,30 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		elapsed := time.Since(start)
 		fmt.Printf("\nget cart for user %v \t time elapsed = %v\n", details.Username, elapsed)
 		return respMap
+
+	case "active-carts":
+		fmt.Println("\t fetching all active carts")
+		rcpt := sales.ReceiptLog{TillNum: details.TillNum}
+
+		receipts, err := rcpt.GetActiveCarts()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "error getting active carts"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["till_num"] = details.TillNum
+		respMap["values"] = receipts
+
+		return respMap
+
+	default:
+		return respMap
 	}
 
-	return respMap
 }
 
 func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
@@ -289,6 +303,10 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			rcpt := sales.ReceiptLog{TillNum: details.TillNum, Poster: details.Username}
 			cart.ReceiptNum, err = rcpt.GenReceipt()
 			if err != nil {
+				respMap["response"] = "error"
+				respMap["message"] = "receipt number is null"
+				respMap["trace"] = err
+
 				return respMap
 			}
 		}
@@ -296,7 +314,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		err = cart.AddCart()
 		if err != nil {
 			respMap["response"] = "error"
-			respMap["message"] = "error\n failed while adding cart"
+			respMap["message"] = "failed adding to cart"
 			respMap["trace"] = err
 
 			return respMap

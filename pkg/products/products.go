@@ -20,6 +20,7 @@ type StockMaster struct {
 	OnOffer          bool    `json:"on_offer" `
 	KgWeight         float64 `json:"kg_weight" `
 	TillPrice        float64 `json:"till_price" `
+	VatAlpha         string  `json:"vat_alpha" `
 	VatPercent       float64 `json:"vat_percent" `
 	Image            string  `json:"image" `
 	PkgQty           float64 `json:"pkg_qty"`

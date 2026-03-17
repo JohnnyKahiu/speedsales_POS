@@ -37,38 +37,23 @@ func SysDefaults() (SysSettings, error) {
 // FetchDefaults
 func FetchDefaults() (SysSettings, error) {
 	var settings SysSettings
-	sql := `SELECT label, params FROM sys_conf WHERE params IS NOT NULL`
+	sql := `SELECT 
+				pos_defaults, doc_heading, vat_codes::text 
+			FROM settings`
 	rows, err := database.PgPool.Query(context.Background(), sql)
 	if err != nil {
+		fmt.Println("error querying system settings    err =", err)
 		return settings, err
 	}
 
-	var settingS []string
-
 	for rows.Next() {
-		var label string
-		var setting []byte
+		vats := ""
+		rows.Scan(&settings.PosDefaults, &settings.DocHead, &vats)
 
-		rows.Scan(&label, &setting)
-
-		settingStr := fmt.Sprintf("\"%v\": %v", label, string(setting))
-
-		settingS = append(settingS, settingStr)
-	}
-
-	settingStr := "{"
-	for i, row := range settingS {
-		if i < (len(settingS) - 1) {
-			settingStr += row + ", "
-		} else {
-			settingStr += row
+		err := json.Unmarshal([]byte(vats), &settings.VatCodes)
+		if err != nil {
+			return settings, err
 		}
-	}
-	settingStr += "}"
-
-	err = json.Unmarshal([]byte(settingStr), &settings)
-	if err != nil {
-		fmt.Println("error ", err)
 	}
 
 	return settings, nil

@@ -2,15 +2,14 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/JohnnyKahiu/speedsales/poserver/internal/cash"
+	"github.com/JohnnyKahiu/speedsales/poserver/internal/order"
 )
 
-func CashSalesGet(w http.ResponseWriter, r *http.Request) {
-	respMap := cash.Get(w, r)
+func OrderSalesGet(w http.ResponseWriter, r *http.Request) {
+	respMap := order.Get(w, r)
 
 	jStr, err := json.Marshal(respMap)
 	if err != nil {
@@ -32,17 +31,15 @@ func CashSalesGet(w http.ResponseWriter, r *http.Request) {
 	w.Write(jStr)
 }
 
-func CashSalesPost(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("cash sales post")
-	respMap := cash.Post(w, r)
+func OrderSalesPost(w http.ResponseWriter, r *http.Request) {
+	respMap := order.Post(w, r)
 
 	jStr, err := json.Marshal(respMap)
 	if err != nil {
-		log.Println("failed to marshal cashSalesPost()  err =", err)
+		log.Println("failed to marshal cashSalesGet()  err =", err)
 	}
 
 	EnableCors(&w)
-
 	// write status code headers
 	if respMap["response"] == "forbidden" {
 		w.WriteHeader(http.StatusForbidden)
@@ -54,6 +51,5 @@ func CashSalesPost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	// return response text
 	w.Write(jStr)
 }

@@ -22,24 +22,28 @@ func EnableCors(w *http.ResponseWriter) {
 func NewRouter() *mux.Router {
 	fmt.Println("http routing")
 
-	// rentals.CreateTables()
-
 	r := mux.NewRouter()
 
-	// r.HandleFunc("/ws", socketHandler)
-	r.Use(JwtMiddleware)
+	r.HandleFunc("/status", AppStatus).Methods("GET", "OPTIONS")
 
-	r.HandleFunc("/sales/cash/{module}", CashSalesGet).Methods("GET", "OPTIONS")
-	r.HandleFunc("/sales/cash/{module}", CashSalesPost).Methods("POST", "OPTIONS")
-	// r.HandleFunc("/sales/order/{module}", CashSalesPost).Methods("POST", "OPTIONS")
+	// Subrouter for routes requiring authentication
+	api := r.PathPrefix("/").Subrouter()
+	api.Use(JwtMiddleware)
 
-	// r.HandleFunc("/sales/payments/{module}", CashSalesPost).Methods("POST", "OPTIONS")
-	// r.HandleFunc("/sales/credit/{module}", CashSalesPost).Methods("POST", "OPTIONS")
-	// r.HandleFunc("/sales/laybye/{module}", CashSalesPost).Methods("POST", "OPTIONS")
+	api.HandleFunc("/configs", ConfigsGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/sales/cash/{module}", CashSalesGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/sales/order/{module}", OrderSalesGet).Methods("GET", "OPTIONS")
 
-	// r.HandleFunc("/sms", sms.Post).Methods("POST", "OPTIONS")
+	api.HandleFunc("/sales/cash/{module}", CashSalesPost).Methods("POST", "OPTIONS")
+	api.HandleFunc("/sales/order/{module}", OrderSalesPost).Methods("POST", "OPTIONS")
 
 	return r
+}
+
+func AppStatus(w http.ResponseWriter, r *http.Request) {
+	EnableCors(&w)
+	w.WriteHeader(200)
+	w.Write([]byte(`Server is running`))
 }
 
 func JwtMiddleware(next http.Handler) http.Handler {
