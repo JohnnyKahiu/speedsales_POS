@@ -85,6 +85,10 @@ func initTbls() {
 	if err := variables.GenSettingsTbl(); err != nil {
 		log.Println("error creating settings table    err =", err)
 	}
+
+	if err := variables.GenBranchTable(); err != nil {
+		log.Println("error creating branch table    err =", err)
+	}
 }
 
 func main() {

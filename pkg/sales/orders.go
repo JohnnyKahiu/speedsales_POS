@@ -3,13 +3,17 @@ package sales
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/JohnnyKahiu/speedsales/poserver/database"
 	db "github.com/JohnnyKahiu/speedsales/poserver/database"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/broker"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/products"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/variables"
 	"github.com/jackc/pgx/v5"
 )
@@ -36,6 +40,7 @@ type Order struct {
 	State        string    `json:"state" name:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
 	Elapsed      float64   `json:"elapsed"`
 	Total        float64   `json:"total"`
+	ServerID     int64
 }
 
 // OrderItem is a variable for current order
@@ -78,6 +83,39 @@ func (ord *Order) NextOrder() error {
 				AND receipt_num = $3`
 
 	rows, err := db.PgPool.Query(context.Background(), sql, ord.Poster, ord.TillNum, ord.ReceiptNum)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		err = rows.Scan(&ord.OrderNum)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// NextOrderTX fetches the next available order_number in context
+// takes context and sql tx as arguments
+// returns an error
+func (ord *Order) NextOrderTX(ctx context.Context, tx pgx.Tx) error {
+	fmt.Println("\n\t\t ac_num =", ord.AcNum)
+	fmt.Println("\t\t poster =", ord.Poster)
+	fmt.Println("\t\t receipt =", ord.ReceiptNum)
+
+	// return nil
+	sql := `SELECT 
+				coalesce(max(order_num), 0) 
+			FROM salesorders 
+			WHERE state = 'pending' 
+				AND poster = $1
+				AND till_num = $2
+				AND receipt_num = $3 `
+
+	rows, err := tx.Query(ctx, sql, ord.Poster, ord.TillNum, ord.ReceiptNum)
 	if err != nil {
 		return err
 	}
@@ -156,7 +194,7 @@ func (ord *Order) NewOrder(ctx context.Context) error {
 // NewOrder generates a new sales order
 func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
 	var err error
-	err = ord.NextOrder()
+	err = ord.NextOrderTX(ctx, tx)
 	if err != nil {
 		fmt.Println("error newOrder    err =", err)
 		return err
@@ -180,25 +218,25 @@ func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
 							extract(YEAR FROM now()), 
 							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'), 
 							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'), 
-							(SELECT CONCAT(coalesce(company_id, 0), coalesce(branch_id, 0)) FROM branches WHERE branch_name = $1) LIMIT 1), 
+							(SELECT CONCAT(coalesce($6, 0), coalesce(branch_id, 0)) FROM branches WHERE branch_name = $1), 
 							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar) 
 						) AS BIGINT) as order_num
 					, coalesce(max(daily_count), 0) + 1 as daily_count
 					, $2 as till_num
 					, $3 as poster
-					, (SELECT branch::varchar FROM users WHERE username = $1) as branch
-					, (SELECT company_id FROM users WHERE username = $1) as company_id
+					, $1 as branch
+					, $6 as company_id
 					, $4
 					, $5
 				FROM salesorders 
-				WHERE trans_date::date = (SELECT now()::date) AND 
-				company_id = $6 AND 
-				branch = $1
+				WHERE trans_date::date = (SELECT now()::date) 
+					-- AND company_id = $6 
+					AND branch = $1
 			RETURNING order_num`
 
 	rows, err := tx.Query(ctx, sql, ord.Branch, ord.TillNum, ord.Poster, ord.AcNum, ord.ReceiptNum, ord.CompanyID)
 	if err != nil {
-		fmt.Println("sale.Orders->NewOrder() query error     err =", err)
+		log.Println("sale.Orders->NewOrder() query error     err =", err)
 		return err
 	}
 	defer rows.Close()
@@ -233,6 +271,7 @@ func (ord *Order) Fetchtems() error {
 		if err != nil {
 			return err
 		}
+
 	}
 
 	fmt.Println("")
@@ -356,7 +395,7 @@ func FetchPayingOrderItems(tillNum string) ([]Sales, error) {
 }
 
 // FetchPayingOrderItems gets all items in order
-func (arg *ReceiptLog) CombineOrdersInBill() error {
+func (arg *ReceiptLog) CombineOrdersInBill(ctx context.Context, tx pgx.Tx) error {
 	if arg.ReceiptNum == 0 {
 		return fmt.Errorf("error ReceiptLog->CombineOrdersInBill()    receipt_num is null")
 	}
@@ -367,7 +406,7 @@ func (arg *ReceiptLog) CombineOrdersInBill() error {
 			WHERE state in ('dispatched') AND receipt_num = $1`
 
 	// var values []Sales
-	rows, err := db.PgPool.Query(context.Background(), sql, arg.ReceiptNum)
+	rows, err := tx.Query(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		return err
 	}
@@ -485,6 +524,16 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 		return nil, 0, fmt.Errorf("error. Order->AddToOrder()    null receipt")
 	}
 
+	// fetch from details from inventory microservice
+	p := products.StockMaster{ItemCode: args.ItemCode}
+	err := p.Fetch(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	args.ItemName = p.ItemName
+	args.Price = p.TillPrice
+
 	tx, err := db.PgPool.Begin(ctx)
 	if err != nil {
 		log.Println("error creating transaction error =", err)
@@ -507,8 +556,9 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 	}
 
 	orderItems := ord.OrderItems
-	args.ReceiptItem = fmt.Sprintf("%v-%v", ord.OrderNum, (len(orderItems) + 1))
 
+	args.TransDate = time.Now()
+	args.ReceiptItem = fmt.Sprintf("%v-%v", ord.OrderNum, (len(orderItems) + 1))
 	if args.State == "" {
 		args.State = "pending"
 	}
@@ -526,12 +576,12 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 	// update order item
 	sql := `UPDATE salesorders 
 			SET 
-				order_items = $1 
+				order_items = (SELECT cast($1 as jsonb)) 
 			WHERE order_num = $2 
-			RETURNING cast(coalesce(order_items, '[]') as varchar)`
-	rows, err := tx.Query(ctx, sql, jStr, ord.OrderNum)
+			--RETURNING cast(coalesce(order_items, '[]') as varchar)`
+	rows, err := tx.Query(ctx, sql, string(jStr), ord.OrderNum)
 	if err != nil {
-		fmt.Println("error fetching order items err =", err)
+		fmt.Println("error updating order_items    err =", err)
 		return nil, 0, err
 	}
 	defer rows.Close()
@@ -553,6 +603,27 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 	tx.Commit(ctx)
 
 	return orderItems, total, nil
+}
+
+// OrderTotal
+func (ord *Order) CalcTotal() float64 {
+	var total float64
+
+	if len(ord.OrderItems) == 0 {
+		return 0
+	}
+
+	if ord.OrderItems == nil {
+		return 0
+	}
+
+	for _, itm := range ord.OrderItems {
+		if itm.State != "DELETED" && itm.State != "VOIDED" {
+			total += (itm.Quantity * itm.Price)
+		}
+	}
+
+	return total
 }
 
 // OrderTotal
@@ -587,9 +658,9 @@ func (ord *Order) CompleteOrder() ([]OrderItem, error) {
 
 	// if kitchen is enabled complete order state should be    'ordered'
 	// else  state = 'dispatched'
-	state := "ordered"
+	ord.State = "ordered"
 	if !variables.ProductionDisp {
-		state = "dispatched"
+		ord.State = "dispatched"
 	}
 
 	err = ord.FetchtemsCtx(ctx, tx)
@@ -608,9 +679,25 @@ func (ord *Order) CompleteOrder() ([]OrderItem, error) {
 				, complete_time = now() 
 			WHERE order_num = $1 `
 
-	_, err = database.PgPool.Exec(ctx, sql, ord.OrderNum, state)
+	_, err = database.PgPool.Exec(ctx, sql, ord.OrderNum, ord.State)
 	if err != nil {
 		fmt.Printf("\n\tfailed to complete order for order_num = %v error = %v \n", ord.OrderNum, err)
+		return nil, err
+	}
+
+	payLoad, err := json.Marshal(ord)
+
+	fmt.Printf("\t kafka broker    addr = 'tcp://	%v'\n", os.Getenv("KAFKA_BROKER"))
+
+	kf := broker.Kafka{
+		Broker:  os.Getenv("KAFKA_BROKER"),
+		Topic:   "sales_orders",
+		Key:     fmt.Sprintf("%v", ord.OrderNum),
+		Payload: payLoad,
+	}
+	err = kf.Produce(ctx)
+	if err != nil {
+		log.Println("kafka error    failed to produce message    err =", err)
 		return nil, err
 	}
 
@@ -626,7 +713,9 @@ func (ord *Order) CompleteOrder() ([]OrderItem, error) {
 
 // OrderVoucher returns order details
 func (ord *Order) VoucherCtx(ctx context.Context, tx pgx.Tx) ([]OrderItem, error) {
-	sql := `SELECT items.item_name, SUM(items.quantity) as qty, items.price, SUM(items.quantity * items.price) as total
+	sql := `SELECT items.item_name
+				, SUM(items.quantity) as qty
+				, items.price, SUM(items.quantity * items.price) as total
 				, items.order_num
 				, (SELECT poster FROM salesorders WHERE order_num = $1) 
 				, (SELECT trans_date FROM salesorders WHERE order_num = $1)
@@ -663,15 +752,22 @@ func (ord *Order) VoucherCtx(ctx context.Context, tx pgx.Tx) ([]OrderItem, error
 	return values, nil
 }
 
-// GetOrdersInBills
+// GetOrdersInBills gets all orders in a bill
+// Queries salesorders table for all orders in a bill
+// Returns an array of orders
 func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	sql := `SELECT
-                order_num
+				trans_date AT TIME ZONE 'Africa/Nairobi'
+                , order_num
 	            , daily_count
 				, poster 
 				, state
 				, ac_num
 				, receipt_num
+				, order_items::varchar
 			FROM salesorders 
 			WHERE 
 				state IN ('pending', 'dispatched', 'paying') AND 
@@ -686,13 +782,31 @@ func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
 	defer rows.Close()
 
 	orders := []Order{}
+	ord.Total = 0.0
 	for rows.Next() {
 		r := Order{}
-		err := rows.Scan(&r.OrderNum, &r.DailyCount, &r.Poster, &r.State, &r.AcNum, &r.ReceiptNum)
+		ordItms := ""
+		err := rows.Scan(&r.TransDate, &r.OrderNum, &r.DailyCount,
+			&r.Poster, &r.State,
+			&r.AcNum, &r.ReceiptNum, &ordItms)
 		if err != nil {
 			log.Println("sql scan error    err =", err)
 			return []Order{}, err
 		}
+
+		err = json.Unmarshal([]byte(ordItms), &r.OrderItems)
+		if err != nil {
+			log.Println("failed to unmarshal order items    err =", err)
+			return []Order{}, err
+		}
+
+		total := float64(0)
+		for _, itm := range r.OrderItems {
+			total += (itm.Price * itm.Quantity)
+		}
+
+		ord.Total += total
+		orders = append(orders, r)
 	}
 
 	return orders, nil
@@ -762,14 +876,24 @@ func OrdIsDeletable(ordNum string) bool {
 
 // DelOrderItem deletes an order item
 func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return []Sales{}, 0, err
+	}
+	defer tx.Rollback(ctx)
+
 	ordNum, _ := strconv.ParseInt(orderNum, 10, 64)
 	ord := Order{OrderNum: ordNum}
 
 	// fetch order items
-	err := ord.Fetchtems() //  FetchOrderItems(orderNum)
+	err = ord.FetchtemsCtx(ctx, tx) //FetchOrderItems(orderNum)
 	if err != nil {
 		return nil, 0, err
 	}
+	fmt.Println("items =", ord.OrderItems)
 
 	for i, itm := range ord.OrderItems {
 		if itm.ReceiptItem == orderItem {
@@ -783,15 +907,19 @@ func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
 	// marshal items to json string
 	jStr, err := json.Marshal(ord.OrderItems)
 	if err != nil {
-		return nil, 0, err
+		return []Sales{}, 0, err
 	}
+	fmt.Println("\n json string =", string(jStr))
 
 	// update order item
-	sql := `UPDATE salesorders SET order_items = $1 WHERE order_num = $2 AND state = 'pending'
-			RETURNING cast(coalesce(order_items, '[]') as varchar)`
-	rows, err := db.PgPool.Query(context.Background(), sql, jStr, orderNum)
+	sql := `UPDATE salesorders 
+			SET order_items = $1 
+			WHERE order_num = $2 
+				AND state = 'pending'
+			RETURNING order_items::varchar `
+	rows, err := db.PgPool.Query(context.Background(), sql, string(jStr), orderNum)
 	if err != nil {
-		fmt.Println("error fetching order items error =", err)
+		fmt.Println("error updaring order items error =", err)
 		return nil, 0, err
 	}
 	defer rows.Close()
@@ -812,7 +940,7 @@ func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
 
 	total := OrderTotal(cart)
 
-	return cart, total, nil
+	return cart, total, tx.Commit(ctx)
 }
 
 // SetOrderPay sets an order to paying
@@ -901,7 +1029,7 @@ func (arg *Order) CombineBill() error {
 		rcpt.Poster = arg.Poster
 		rcpt.TillNum = arg.TillNum
 
-		arg.OrderNum, err = rcpt.GenReceipt()
+		err = rcpt.GenReceipt()
 		if err != nil {
 			return fmt.Errorf("sales.Order->CombineBill(). failed to get next open order")
 		}
@@ -917,6 +1045,21 @@ func (arg *Order) CombineBill() error {
 	}
 
 	return nil
+}
+
+func (arg *ReceiptLog) PendingOrdersInBill(ctx context.Context) bool {
+	sql := `SELECT
+				CASE WHEN count(*) > 0 THEN true ELSE false END exists 
+			FROM salesorders 
+			WHERE receipt_num = $1 AND state = 'pending'`
+
+	exists := false
+	if err := database.PgPool.QueryRow(ctx, sql, arg.ReceiptNum).Scan(&exists); err != nil {
+		log.Println("sql error. failed to fetch pendingOrdersInBill    err =", err)
+		return false
+	}
+
+	return exists
 }
 
 // addOrderToReceipt adds current order items into receipt
@@ -998,29 +1141,43 @@ func (arg *ReceiptLog) OrdersToPay(orders []string, receipt int64) error {
 
 // CloseBill joins orders in bill to sale
 func (arg *ReceiptLog) CloseBill() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
 	if arg.ReceiptNum == 0 {
 		return fmt.Errorf("error. ReceiptLog->CloseBill()    receipt is null")
 	}
 
-	err := arg.CombineOrdersInBill()
+	// check if there exists any pending orders
+	if arg.PendingOrdersInBill(ctx) {
+		return errors.New("Incomplete Orders exists")
+	}
+
+	err = arg.CombineOrdersInBill(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("error. ReceiptLog->CloseBill()    failed to combine orders in bill")
 	}
 
-	err = arg.UpdateCart("")
+	err = arg.UpdateCart(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("error. ReceiptLog->CloseBill()    %v", err)
 	}
 
-	err = arg.CloseOrders()
+	err = arg.CloseOrders(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("error, ReceiptLog->CloseBill()    %v", err)
 	}
 
-	return nil
+	return tx.Commit(ctx)
 }
 
-func (arg *ReceiptLog) UpdateCart(state string) error {
+func (arg *ReceiptLog) UpdateCart(ctx context.Context, tx pgx.Tx) error {
 	if arg.Cart == nil {
 		return fmt.Errorf("error. ReceiptLog->UpdateCart()    null cart")
 	}
@@ -1029,8 +1186,8 @@ func (arg *ReceiptLog) UpdateCart(state string) error {
 		return fmt.Errorf("error. ReceiptLog->UpdateCart()    null receipt")
 	}
 
-	if state == "" {
-		state = "pending payment"
+	if arg.State == "" {
+		arg.State = "pending payment"
 	}
 
 	arg.Total = 0
@@ -1050,7 +1207,7 @@ func (arg *ReceiptLog) UpdateCart(state string) error {
 				, last_updated = now() 
 			WHERE receipt_num = $4 
 			RETURNING poster`
-	rows, err := db.PgPool.Query(context.Background(), sql, string(cart), arg.Total, state, arg.ReceiptNum)
+	rows, err := tx.Query(ctx, sql, string(cart), arg.Total, arg.State, arg.ReceiptNum)
 	if err != nil {
 		log.Println("sql error. ReceiptLog->UpdateCart()    err =", err)
 		return fmt.Errorf("error. ReceiptLog->UpdateCart()    sql error")
@@ -1066,10 +1223,10 @@ func (arg *ReceiptLog) UpdateCart(state string) error {
 	return nil
 }
 
-func (arg *ReceiptLog) CloseOrders() error {
+func (arg *ReceiptLog) CloseOrders(ctx context.Context, tx pgx.Tx) error {
 	sql := "UPDATE salesorders SET state = 'paying' WHERE receipt_num = $1 AND state = 'dispatched'"
 
-	_, err := db.PgPool.Exec(context.Background(), sql, arg.ReceiptNum)
+	_, err := tx.Exec(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		log.Println("sql error. ReceiptLog->CloseOrders()    err =", err)
 		return fmt.Errorf("error. ReceiptLog->CloseOrders()    sql error")

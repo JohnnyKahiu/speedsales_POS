@@ -53,3 +53,26 @@ func OrderSalesPost(w http.ResponseWriter, r *http.Request) {
 
 	w.Write(jStr)
 }
+
+func OrderSalesDel(w http.ResponseWriter, r *http.Request) {
+	respMap := order.Delete(w, r)
+
+	jStr, err := json.Marshal(respMap)
+	if err != nil {
+		log.Println("failed to marshal orderSales respon()  err =", err)
+	}
+
+	EnableCors(&w)
+	// write status code headers
+	if respMap["response"] == "forbidden" {
+		w.WriteHeader(http.StatusForbidden)
+	}
+	if respMap["response"] == "error" {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	if respMap["response"] == "success" {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	w.Write(jStr)
+}

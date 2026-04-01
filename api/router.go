@@ -37,6 +37,8 @@ func NewRouter() *mux.Router {
 	api.HandleFunc("/sales/cash/{module}", CashSalesPost).Methods("POST", "OPTIONS")
 	api.HandleFunc("/sales/order/{module}", OrderSalesPost).Methods("POST", "OPTIONS")
 
+	api.HandleFunc("/sales/order/{module}", OrderSalesDel).Methods("DELETE", "OPTIONS")
+
 	return r
 }
 

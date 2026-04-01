@@ -57,14 +57,14 @@ func genReceiptTbl() error {
 }
 
 // GenReceipt creates or returns next available sales receipt
-func (arg *ReceiptLog) GenReceipt() (int64, error) {
+func (arg *ReceiptLog) GenReceipt() error {
 	start := time.Now()
 	fmt.Println("sale type =", arg.SaleType)
 	fmt.Println("laybye id =", arg.LaybyeID)
 	defer fmt.Printf("GenReceipt took %v", time.Since(start))
 
 	if arg.TillNum == 0 {
-		return 0, fmt.Errorf("op error, till num is null")
+		return fmt.Errorf("op error, till num is null")
 	}
 
 	fmt.Println("Gen Receipt for till num =", arg.TillNum)
@@ -80,7 +80,7 @@ func (arg *ReceiptLog) GenReceipt() (int64, error) {
 	// Query database rows
 	rows, err := database.PgPool.Query(context.Background(), sql, arg.TillNum, arg.SaleType)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer rows.Close()
 
@@ -94,7 +94,7 @@ func (arg *ReceiptLog) GenReceipt() (int64, error) {
 	if arg.ReceiptNum > 0 {
 		elapsed := time.Since(start)
 		fmt.Printf("\n\t\t function GenReceipt() took:   %v \n", elapsed)
-		return arg.ReceiptNum, nil
+		return nil
 	}
 
 	// create a new receipt number
@@ -102,10 +102,10 @@ func (arg *ReceiptLog) GenReceipt() (int64, error) {
 	fmt.Printf("\nreceipt = %v\n", arg.ReceiptNum)
 	if err != nil {
 		fmt.Printf("Error creating receipt %v\n", err.Error())
-		return 0, err
+		return err
 	}
 
-	return arg.ReceiptNum, nil
+	return nil
 }
 
 // GenReceipt creates or returns next available sales receipt

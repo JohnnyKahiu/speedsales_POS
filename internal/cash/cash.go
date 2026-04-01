@@ -34,32 +34,6 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 	m := vars["module"]
 
 	switch m {
-	case "get-receipt":
-		if !details.MakeSales {
-			respMap["response"] = "forbidden"
-			respMap["message"] = "forbidden"
-			return respMap
-		}
-		var a sales.ReceiptLog
-		a.Poster = details.Username
-		a.Branch = details.Branch
-		a.CompanyID = details.CompanyID
-		a.TillNum = details.TillNum
-		a.SaleType = "Cash Sale"
-
-		receiptNum, err := a.GenReceipt()
-		fmt.Println("\nreceipt number =", receiptNum)
-
-		if err != nil {
-			respMap["response"] = "error"
-			respMap["message"] = "failed to get receipt"
-			respMap["trace"] = err
-			return respMap
-		}
-
-		respMap["response"] = "success"
-		respMap["receipt"] = receiptNum
-		return respMap
 
 	case "cart":
 		fmt.Println("\t  == timing get cart request ==")
@@ -85,7 +59,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			a.TillNum = details.TillNum
 			a.SaleType = "Cash Sale"
 
-			receiptNum, _ = a.GenReceipt()
+			a.GenReceipt()
 		} else {
 			a.ReceiptNum, _ = strconv.ParseInt(rcpt, 10, 64)
 		}
@@ -173,7 +147,8 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 	fmt.Println("cash post module = ", m)
 
-	if m == "open-till" {
+	switch m {
+	case "open-till":
 		fmt.Printf("\n\t Open till \n\t make_sales = %v \n\t accept_payments = %v \n\t, username = %v \n ", details.MakeSales, details.AcceptPayment, details.Username)
 
 		if !details.MakeSales && !details.AcceptPayment {
@@ -261,17 +236,147 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		// respMap["token"] = newToken
 
 		return respMap
-	}
 
-	if m == "receipt" {
+	case "new_receipt":
+		fmt.Println("\t new bill")
 		if !details.MakeSales {
 			respMap["response"] = "error"
 			respMap["message"] = "forbidden"
 			return respMap
 		}
-	}
 
-	if m == "add-cart" {
+		receipt := sales.ReceiptLog{
+			TillNum:   details.TillNum,
+			Poster:    details.Username,
+			SaleType:  "Cash Sale",
+			Branch:    details.Branch,
+			CompanyID: details.CompanyID,
+			AcNum:     "0",
+		}
+
+		err := receipt.GenReceipt()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "receipt number is null"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		// get active carts
+		receipts, err := receipt.GetActiveCarts()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "error getting active carts"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["carts"] = receipts
+		respMap["receipt_num"] = receipt.ReceiptNum
+		return respMap
+
+	case "new_bill":
+		if !details.MakeSales {
+			respMap["response"] = "forbidden"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+		receipt := sales.ReceiptLog{
+			TillNum:   details.TillNum,
+			Branch:    details.Branch,
+			Poster:    details.Username,
+			SaleType:  "Cash Sale",
+			CompanyID: 0,
+		}
+
+		// ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// defer cancel()
+
+		err := receipt.NewBill()
+		if err != nil {
+			log.Println("error requesting new bill     err =", err)
+			respMap["response"] = "error"
+			respMap["message"] = "failed to create new bill"
+			return respMap
+		}
+
+		err = receipt.GenReceipt()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "receipt number is null"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		// get active carts
+		receipts, err := receipt.GetActiveCarts()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "error getting active carts"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["bills"] = receipts
+		respMap["receipt_num"] = receipt.ReceiptNum
+		return respMap
+
+	case "suspend":
+		if !details.MakeSales {
+			respMap["response"] = "forbidden"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+			return respMap
+		}
+
+		rcpt := sales.ReceiptLog{}
+		err = json.Unmarshal(b, &rcpt)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed to unmarshal json"
+			return respMap
+		}
+
+		err = rcpt.Suspend()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed to suspend"
+			respMap["trace"] = err
+			return respMap
+		}
+
+		err = rcpt.GenReceipt()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed to gen new receipt"
+			respMap["trace"] = err
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		return respMap
+
+	case "receipt":
+		if !details.MakeSales {
+			respMap["response"] = "forbidden"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+	case "add-cart":
 		if !details.MakeSales {
 			respMap["response"] = "forbidden"
 			respMap["message"] = "forbidden"
@@ -301,7 +406,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		// fetch receiptNum if not provided
 		if cart.ReceiptNum == 0 {
 			rcpt := sales.ReceiptLog{TillNum: details.TillNum, Poster: details.Username}
-			cart.ReceiptNum, err = rcpt.GenReceipt()
+			err = rcpt.GenReceipt()
 			if err != nil {
 				respMap["response"] = "error"
 				respMap["message"] = "receipt number is null"
@@ -309,6 +414,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 				return respMap
 			}
+			cart.ReceiptItem = fmt.Sprintf("%v", rcpt.ReceiptNum)
 		}
 
 		err = cart.AddCart()
@@ -324,7 +430,55 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["cart"] = cart
 
 		return respMap
-	}
 
+	case "close_bill":
+		if !details.MakeSales {
+			respMap["response"] = "error"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+		// get params
+		b, err := io.ReadAll(r.Body)
+		fmt.Println("body =", r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+
+			return respMap
+		}
+
+		// unmarshal body
+		receipt := sales.ReceiptLog{}
+		err = json.Unmarshal(b, &receipt)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+
+			return respMap
+		}
+
+		// fetch receiptNum if not provided
+		if receipt.ReceiptNum == 0 {
+			respMap["response"] = "error"
+			respMap["message"] = "receipt number is null"
+			return respMap
+		}
+
+		err = receipt.CloseBill()
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed closing bill"
+			respMap["trace"] = err
+
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["sales"] = receipt
+
+		return respMap
+
+	}
 	return respMap
 }
