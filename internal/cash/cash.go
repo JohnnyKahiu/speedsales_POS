@@ -1,7 +1,6 @@
 package cash
 
 import (
-	"context"
 	"encoding/json"
 
 	"fmt"
@@ -139,9 +138,6 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 	details := logins.Users{}
 	json.Unmarshal([]byte(userStr), &details)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
 	vars := mux.Vars(r)
 	m := vars["module"]
 
@@ -174,7 +170,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		authDetails := logins.Users{Username: entry["approver"]}
 
 		// fetch authorizer's details
-		err = authDetails.FetchUser(ctx)
+		err = authDetails.FetchUser(r.Context())
 		fmt.Printf("\nauthorizer details = %v\n", authDetails)
 		if err != nil {
 			log.Printf("\t error fetching user %v\t error = %v\n\n", entry["approver"], err)

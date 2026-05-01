@@ -21,23 +21,23 @@ import (
 // Order holds a new sales order variable
 type Order struct {
 	table        string    `name:"salesorders" type:"table"`
-	TransDate    time.Time `json:"trans_date" name:"trans_date" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
-	CompleteTime time.Time `json:"complete_time" name:"complete_time" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
-	OrderNum     int64     `json:"order_num" name:"order_num" type:"field" sql:"BIGINT NOT NULL PRIMARY KEY"`
-	DailyCount   int64     `json:"daily_count" name:"daily_count" type:"field" sql:"BIGINT NOT NULL"`
-	OrderItems   []Sales   `json:"order_items" name:"order_items" type:"field" sql:"JSONB"`
-	Poster       string    `json:"poster" name:"poster" type:"field" sql:"VARCHAR NOT NULL"`
-	Branch       string    `json:"branch" name:"branch" type:"field" sql:"VARCHAR NOT NULL"`
-	StkLocation  string    `json:"stk_Location"`
-	DispBy       string    `json:"disp_by" name:"disp_by" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'nan'"`
-	DispTime     time.Time `json:"disp_time" name:"disp_time" type:"field" sql:"TIMESTAMPTZ"`
-	CompanyID    int64     `json:"company_id" name:"company_id" type:"field" sql:"BIGINT NOT NULL"`
-	TillNum      int64     `json:"till_num" name:"till_num" type:"field" sql:"BIGINT NOT NULL"`
-	PayTill      int64     `json:"pay_till" name:"pay_till" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
-	Receipt      int64     `json:"receipt" name:"receipt" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
-	ReceiptNum   int64     `json:"receipt_num" name:"receipt_num" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
-	AcNum        string    `json:"ac_num" name:"ac_num" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
-	State        string    `json:"state" name:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
+	TransDate    time.Time `json:"trans_date" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	CompleteTime time.Time `json:"complete_time" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	OrderNum     int64     `json:"order_num" type:"field" sql:"BIGINT NOT NULL PRIMARY KEY"`
+	DailyCount   int64     `json:"daily_count" type:"field" sql:"BIGINT NOT NULL"`
+	OrderItems   []Sales   `json:"order_items" type:"field" sql:"JSONB"`
+	Poster       string    `json:"poster" type:"field" sql:"VARCHAR NOT NULL"`
+	Branch       string    `json:"branch" type:"field" sql:"VARCHAR NOT NULL"`
+	StkLocation  string    `json:"stk_Location" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'store'" `
+	DispBy       string    `json:"disp_by" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'nan'"`
+	DispTime     time.Time `json:"disp_time" type:"field" sql:"TIMESTAMPTZ"`
+	CompanyID    int64     `json:"company_id" type:"field" sql:"BIGINT NOT NULL"`
+	TillNum      int64     `json:"till_num" type:"field" sql:"BIGINT NOT NULL"`
+	PayTill      int64     `json:"pay_till" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
+	Receipt      int64     `json:"receipt" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
+	ReceiptNum   int64     `json:"receipt_num" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
+	AcNum        string    `json:"ac_num" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
+	State        string    `json:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
 	Elapsed      float64   `json:"elapsed"`
 	Total        float64   `json:"total"`
 	ServerID     int64
@@ -677,9 +677,11 @@ func (ord *Order) CompleteOrder() ([]OrderItem, error) {
 			SET 
 				state = $2
 				, complete_time = now() 
+				, branch = $3
+				, stk_location = $4
 			WHERE order_num = $1 `
 
-	_, err = database.PgPool.Exec(ctx, sql, ord.OrderNum, ord.State)
+	_, err = database.PgPool.Exec(ctx, sql, ord.OrderNum, ord.State, ord.Branch, ord.StkLocation)
 	if err != nil {
 		fmt.Printf("\n\tfailed to complete order for order_num = %v error = %v \n", ord.OrderNum, err)
 		return nil, err

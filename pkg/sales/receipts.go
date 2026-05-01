@@ -663,3 +663,48 @@ func (arg *ReceiptLog) Analyze() error {
 
 	return nil
 }
+
+func (arg *ReceiptLog) GetPayingRcpts(ctxt context.Context) ([]ReceiptLog, error) {
+	sql := `SELECT
+				sm.trans_date at time zone 'utc' at time zone 'eat' trans_date
+				, sm.till_num
+				, sm.receipt_num
+				, sm.branch
+				, sm.poster
+				, total
+				, coalesce(cart::varchar, '[{}]')
+				, state
+								
+			FROM salestrace as sm
+			WHERE state in ('paying', 'pending payment')  /*AND trans_date::date < now()::date*/ 	AND branch = $1
+			ORDER BY last_updated ASC`
+
+	ctx, cancel := context.WithTimeout(ctxt, 20*time.Second)
+	defer cancel()
+
+	rows, err := database.PgPool.Query(ctx, sql, arg.Branch)
+	if err != nil {
+		log.Println("failed to query paying receipts    err =", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var vals []ReceiptLog
+	for rows.Next() {
+		var r ReceiptLog
+
+		cartStr := ""
+		err = rows.Scan(&r.TransDate, &r.TillNum, &r.ReceiptNum, &r.Branch, &r.Poster, &r.Total, &cartStr, &r.State)
+		if err != nil {
+			log.Println("failed to scan rows    err =", err)
+			return nil, err
+		}
+
+		json.Unmarshal([]byte(cartStr), &r.Cart)
+
+		vals = append(vals, r)
+	}
+
+	// fmt.Println("vals =", vals)
+	return vals, nil
+}

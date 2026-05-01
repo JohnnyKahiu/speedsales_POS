@@ -141,9 +141,15 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			branch = "Main"
 		}
 
+		stkLoc := details.StkLocation
+		if stkLoc == "" {
+			stkLoc = "Store"
+		}
+
+		// log.Fatalf("\t branch = '%s'", branch)
 		ord := sales.Order{
-			Branch:      details.Branch,
-			StkLocation: "0",
+			Branch:      branch,
+			StkLocation: stkLoc,
 			CompanyID:   details.CompanyID,
 			Poster:      details.Username,
 			TillNum:     details.TillNum,
@@ -179,7 +185,15 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
-		ord := sales.Order{}
+		branch := details.Branch
+		if branch == "" {
+			branch = "Main"
+		}
+		stkLoc := details.StkLocation
+		if stkLoc == "" {
+			stkLoc = "Store"
+		}
+		ord := sales.Order{Branch: branch, StkLocation: stkLoc}
 		err = json.Unmarshal(b, &ord)
 		if err != nil {
 			log.Println("failed to unmarshal body    err =", err)
