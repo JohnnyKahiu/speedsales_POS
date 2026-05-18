@@ -533,6 +533,8 @@ func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
 
 	args.ItemName = p.ItemName
 	args.Price = p.TillPrice
+	args.VatAlpha = p.VatAlpha
+	args.VatPerc = p.VatPercent
 
 	tx, err := db.PgPool.Begin(ctx)
 	if err != nil {
@@ -679,14 +681,22 @@ func (ord *Order) CompleteOrder() ([]OrderItem, error) {
 				, complete_time = now() 
 				, branch = $3
 				, stk_location = $4
-			WHERE order_num = $1 `
+			WHERE order_num = $1`
 
-	_, err = database.PgPool.Exec(ctx, sql, ord.OrderNum, ord.State, ord.Branch, ord.StkLocation)
+	rows, err := database.PgPool.Query(ctx, sql, ord.OrderNum, ord.State, ord.Branch, ord.StkLocation)
 	if err != nil {
 		fmt.Printf("\n\tfailed to complete order for order_num = %v error = %v \n", ord.OrderNum, err)
 		return nil, err
 	}
+	defer rows.Close()
 
+	for rows.Next() {
+		err = rows.Scan(&ord.TransDate)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("\t trans_date =", ord.TransDate)
+	}
 	payLoad, err := json.Marshal(ord)
 
 	fmt.Printf("\t kafka broker    addr = 'tcp://	%v'\n", os.Getenv("KAFKA_BROKER"))

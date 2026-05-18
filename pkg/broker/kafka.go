@@ -11,6 +11,7 @@ import (
 type Kafka struct {
 	Broker     string
 	Topic      string
+	GroupID    string
 	Connection *kafka.Conn
 	Key        string
 	Payload    []byte

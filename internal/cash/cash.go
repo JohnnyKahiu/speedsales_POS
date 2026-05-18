@@ -475,6 +475,31 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		return respMap
 
+	case "close-till":
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "params error"
+			return respMap
+		}
+
+		till := sales.Till{}
+		json.Unmarshal(b, &till)
+
+		till.Supervisor = till.CloseSupervisor
+		err = till.CloseTill(r.Context())
+		if err != nil {
+			log.Println("fatal error. closing till failed")
+			respMap["response"] = "error"
+			respMap["message"] = err
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["till_num"] = till.TillNO
+		// respMap["token"] = newToken
+
+		return respMap
 	}
 	return respMap
 }

@@ -29,6 +29,7 @@ type Sales struct {
 	Total       float64   `json:"total" type:"field" sql:"FLOAT NOT NULL DEFAULT '0' "`
 	OnOffer     bool      `json:"on_offer" type:"field" sql:"BOOL NOT NULL DEFAULT 'false'"`
 	Vat         float64   `json:"vat" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
+	VatPerc     float64   `json:"vat_perc"`
 	VatAlpha    string    `json:"vat_alpha" type:"field" sql:"VARCHAR(1) NOT NULL"`
 	State       string    `json:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'active' "`
 	ReceiptItem string    `json:"receipt_item" type:"field" sql:"VARCHAR NOT NULL"`

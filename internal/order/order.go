@@ -109,6 +109,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["message"] = "user details not found"
 		return respMap
 	}
+	// log.Fatalf("user_details = %s", userStr)
 
 	details := logins.Users{}
 	json.Unmarshal([]byte(userStr), &details)
@@ -136,6 +137,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
+		// log.Fatalln("branch =", details.Branch)
 		branch := details.Branch
 		if branch == "" {
 			branch = "Main"

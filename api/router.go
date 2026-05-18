@@ -40,6 +40,7 @@ func NewRouter() *mux.Router {
 	api.HandleFunc("/sales/order/{module}", OrderSalesDel).Methods("DELETE", "OPTIONS")
 
 	api.HandleFunc("/sales/payment/{module}", PaymentGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/sales/payment/{module}", PaymentPOST).Methods("POST", "OPTIONS")
 
 	return r
 }
@@ -71,6 +72,7 @@ func JwtMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// fmt.Println("user branch =", user.Branch)
 		juser, _ := json.Marshal(user)
 
 		r.Header.Set("user_details", string(juser))

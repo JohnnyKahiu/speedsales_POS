@@ -50,6 +50,7 @@ type Till struct {
 	AmendSupervisor string    `json:"amend_supervisor" name:"amend_supervisor" type:"field" sql:"VARCHAR DEFAULT 'nan'"`
 	ConfirmedBy     string    `json:"confirmed_by" name:"confirmed_by" type:"name" sql:"VARCHAR NOT NULL DEFAULT 'nan'"`
 	Confirmed       bool      `json:"confirmed" name:"confirmed" type:"field" sql:"BOOL NOT NULL DEFAULT 'false'"`
+	Token           string    `json:"token"`
 }
 
 // genTillTbl generates a new till number
@@ -168,6 +169,43 @@ func (arg *Till) OpenTill(db DBPool) error {
 	return nil
 }
 
+// CloseTill closes an existing till
+// Updates close_time, close and cash summaries
+// returns an error if fails
+func (arg *Till) CloseTill(ctxt context.Context) error {
+	if arg.Supervisor == "" || arg.Supervisor == "nan" {
+		return errors.New("supervisor is required")
+	}
+
+	// validate supervisor
+	err := arg.validateApprover(ctxt)
+	if err != nil {
+		log.Println("supervisor validation error    err =", err)
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctxt, 45*time.Second)
+	defer cancel()
+
+	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		log.Println("error. failed to begin db transaction")
+		return fmt.Errorf("internal error")
+	}
+	defer tx.Rollback(ctx)
+
+	// update cash summary
+	err = arg.updateCashSummary(ctx, tx)
+	if err != nil {
+		log.Println("failed to update cash_summary")
+		return fmt.Errorf("internal error")
+	}
+
+	// remove till from login
+
+	return tx.Commit(ctx)
+}
+
 // UpdateTill
 func (arg *Till) UpdateTill(ctx context.Context) error {
 
@@ -190,4 +228,102 @@ func (arg *Till) UpdateTill(ctx context.Context) error {
 	fmt.Println("response =", resp)
 
 	return nil
+}
+
+func (arg *Till) updateCashSummary(ctx context.Context, tx pgx.Tx) error {
+	// update cash summary
+	sql := `UPDATE sales_till st
+			SET
+				close_time = now(),
+				close_supervisor = $2,
+				close_cash = $3,
+				cash_summary = concat('{', '"cash":', a.total_cash
+									, ', "mpesa":', a.total_mobile
+									, ', "ecard":', a.total_ecards
+									, ', "cheque":', a.total_cheques
+									, ', "discount":', a.redeemed
+									, ', "returns":', a.returns , '}')::jsonb
+			FROM
+				(
+					SELECT 
+						c.till_num
+						, coalesce(c.cash, 0) + coalesce(lay_payments.cash, 0) + coalesce(credit.cash, 0) total_cash
+						, coalesce(c.mpesa, 0) + coalesce(lay_payments.mpesa, 0) + coalesce(credit.mpesa, 0) total_mobile
+						, coalesce(c.ecard, 0) + coalesce(lay_payments.ecard, 0) + coalesce(credit.ecard, 0) total_ecards
+						, coalesce(c.cheque, 0) + coalesce(lay_payments.cheque, 0) + coalesce(credit.cheque, 0) total_cheques
+						, c.redeemed
+						, coalesce(rolls.amount, 0) as cash_outs
+						, coalesce(rets.amount, 0) as returns
+					FROM
+					(SELECT 
+						pay_till as till_num
+						, SUM(cast(pay_details::json->'cash' as varchar)::float) as cash 
+						, SUM(cast(pay_details::json->'mpesa' as varchar)::float) as mpesa 
+						, SUM(cast(pay_details::json->'ecard' as varchar)::float) as ecard 
+						, SUM(cast(pay_details::json->'check' as varchar)::float) as cheque
+						, SUM(cast(pay_details::json->'redeem' as varchar)::float) as redeemed 
+						, SUM(cast(pay_details::json->'voucher' as varchar)::float) as voucher 
+					FROM salestrace
+					WHERE pay_till::varchar = $1 AND state = 'POSTED' GROUP BY pay_till) as c
+							LEFT JOIN
+					(SELECT coalesce(sum(amount), 0) as amount, till_num FROM cash_movement WHERE type = 'cash rollup' AND confirm_state = 'CONFIRMED' GROUP BY till_num) as rolls
+									ON rolls.till_num = c.till_num
+							LEFT JOIN
+					(SELECT till_num, SUM(total) amount FROM salestrace WHERE state = 'RETURN' GROUP BY till_num) as rets
+									ON rets.till_num = c.till_num
+						LEFT JOIN
+					(SELECT till_num, coalesce(SUM(cash_paid), 0) as cash, coalesce(SUM(mpesa_paid), 0) as mpesa
+						, coalesce(SUM(ecard_paid), 0) as ecard, coalesce(SUM(cheque_paid), 0) as cheque
+						, coalesce(SUM(amount), 0) total_sales
+					FROM accounts_txn GROUP BY till_num) as credit
+						ON c.till_num = credit.till_num
+							LEFT JOIN
+					(SELECT
+							t.till_no as till_num
+							, cash.amount as cash
+							, mpesa.amount as mpesa
+							, ecards.amount as ecard
+							, cheque.amount as cheque
+						FROM
+						(SELECT till_no FROM sales_till) as t
+							LEFT JOIN
+						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount
+							FROM laybye_trans
+						WHERE trans_type = 'payment' AND pay_type = 'cash' GROUP BY till_num) as cash
+							ON t.till_no = cash.till_num
+							LEFT JOIN
+
+						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount
+							FROM laybye_trans 
+						WHERE trans_type = 'payment' AND pay_type = 'mpesa' GROUP BY till_num) as mpesa
+							ON t.till_no = mpesa.till_num
+							LEFT JOIN
+
+						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount 
+							FROM laybye_trans 
+						WHERE trans_type = 'payment' AND pay_type = 'ecard' GROUP BY till_num) as ecards
+							ON t.till_no = mpesa.till_num
+							LEFT JOIN
+
+						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount 
+							FROM laybye_trans 
+						WHERE trans_type = 'payment' AND pay_type = 'cheque' GROUP BY till_num) as cheque
+							ON t.till_no = mpesa.till_num) as lay_payments
+						ON lay_payments.till_num = c.till_num
+				) as a
+			WHERE st.till_no::varchar = $1			
+			`
+
+	_, err := tx.Exec(ctx, sql, arg.TillNO, arg.Supervisor, arg.CloseCash)
+	if err != nil {
+		log.Println("postgresql error,  failed to update close sales_till     err =", err)
+		return err
+	}
+	return nil
+}
+
+func (arg *Till) validateApprover(ctx context.Context) error {
+	approver := Approver{Approver: arg.Supervisor, Token: arg.Token, ApproverRights: "Cash"}
+
+	return approver.Validate(ctx)
 }

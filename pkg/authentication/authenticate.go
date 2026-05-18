@@ -19,6 +19,7 @@ type User struct {
 	LastName             string    `json:"last_name" name:"last_name" type:"field" sql:"VARCHAR"`
 	OtherName            string    `json:"other_name" name:"other_name" type:"field" sql:"VARCHAR"`
 	Telephone            string    `json:"telephone" name:"telephone" type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
+	Branch               string    `json:"branch" name:"branch" type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
 	Status               string    `json:"status" name:"status" type:"field" sql:"VARCHAR"`
 	Username             string    `json:"username" name:"username" type:"field" sql:"VARCHAR NOT NULL UNIQUE"`
 	Email                string    `json:"email" name:"email" type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`

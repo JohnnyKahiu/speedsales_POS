@@ -29,5 +29,11 @@ func GenTables() error {
 	if err != nil {
 		log.Fatalln("failed to generate order table err =", err)
 	}
+
+	err = genCashTable()
+	if err != nil {
+		log.Fatalln("failed to generate cash table err =", err)
+	}
+
 	return err
 }
