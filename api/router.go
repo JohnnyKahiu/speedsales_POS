@@ -42,6 +42,9 @@ func NewRouter() *mux.Router {
 	api.HandleFunc("/sales/payment/{module}", PaymentGet).Methods("GET", "OPTIONS")
 	api.HandleFunc("/sales/payment/{module}", PaymentPOST).Methods("POST", "OPTIONS")
 
+	api.HandleFunc("/sales/laybye/{module}", LaybyeSalesGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/sales/laybye/{module}", LaybyeSalesPost).Methods("POST", "OPTIONS")
+
 	return r
 }
 

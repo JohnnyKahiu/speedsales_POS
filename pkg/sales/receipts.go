@@ -42,6 +42,7 @@ type ReceiptLog struct {
 	SyncServers     string                 `json:"sync_servers" name:"sync_servers" type:"field" sql:"VARCHAR[] NOT NULL DEFAULT '{}'"`
 	LastUpdated     time.Time              `json:"last_updated" name:"last_updated" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
 	OrdersInBill    int                    `json:"orders_in_bill" name:"orders_in_bill" type:"field" sql:"INT NOT NULL DEFAULT '0'"`
+	CreditDetails   []Account              `json:"credit_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{\"ac_name\":\"\", \"ac_num\":-1, \"amount\":0, \"approver\":\"\"}'"`
 	Etr             ETR                    `json:"etr" name:"etr" type:"field" sql:"JSONB"`
 	ReturnTrace     int64                  `json:"return_trace" name:"return_trace" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
 	Analysis        map[string]interface{} `json:"analysis" name:"analysis" type:"field" sql:"JSONB"`

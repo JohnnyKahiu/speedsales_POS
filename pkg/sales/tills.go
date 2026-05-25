@@ -323,6 +323,7 @@ func (arg *Till) updateCashSummary(ctx context.Context, tx pgx.Tx) error {
 }
 
 func (arg *Till) validateApprover(ctx context.Context) error {
+
 	approver := Approver{Approver: arg.Supervisor, Token: arg.Token, ApproverRights: "Cash"}
 
 	return approver.Validate(ctx)

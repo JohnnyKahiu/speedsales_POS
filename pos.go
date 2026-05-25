@@ -13,6 +13,8 @@ import (
 
 	"github.com/JohnnyKahiu/speedsales/poserver/api"
 	"github.com/JohnnyKahiu/speedsales/poserver/database"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/credit"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/laybye"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/sales"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/variables"
 	"github.com/joho/godotenv"
@@ -80,6 +82,14 @@ func (arg *ConfigFile) readConfFile() error {
 func initTbls() {
 	if err := sales.GenTables(); err != nil {
 		log.Println("error creating sales tables    err =", err)
+	}
+
+	if err := credit.GenAccountsTxnTable(); err != nil {
+		log.Println("error creating accounts txn table    err =", err)
+	}
+
+	if err := laybye.GenTable(); err != nil {
+		log.Println("error creating laybyes table    err =", err)
 	}
 
 	if err := variables.GenSettingsTbl(); err != nil {
