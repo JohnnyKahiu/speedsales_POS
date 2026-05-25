@@ -5,9 +5,11 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/JohnnyKahiu/speedsales/poserver/database"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/laybye"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/logins"
 	"github.com/gorilla/mux"
+	"github.com/jackc/pgx/v5"
 )
 
 func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
@@ -74,10 +76,16 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		}
 
 		lay.Poster = details.Username
-		lay.Branch = details.Branch
-		lay.CompanyID = details.CompanyID
 
-		if err := lay.Register(r.Context()); err != nil {
+		tx, err := database.PgPool.BeginTx(r.Context(), pgx.TxOptions{})
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed to start transaction"
+			return respMap
+		}
+		defer tx.Rollback(r.Context())
+
+		if err := lay.Register(r.Context(), tx); err != nil {
 			respMap["response"] = "error"
 			respMap["message"] = err.Error()
 			return respMap
