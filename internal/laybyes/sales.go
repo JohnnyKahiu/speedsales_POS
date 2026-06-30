@@ -95,6 +95,45 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["laybye"] = lay
 		return respMap
 
+	case "add-item":
+		if !details.MakeSales {
+			respMap["response"] = "forbidden"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+			return respMap
+		}
+
+		item := laybye.LaybyeItem{}
+		if err := json.Unmarshal(b, &item); err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "invalid request body"
+			return respMap
+		}
+
+		tx, err := database.PgPool.BeginTx(r.Context(), pgx.TxOptions{})
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "failed to start transaction"
+			return respMap
+		}
+		defer tx.Rollback(r.Context())
+
+		if err := item.AddItem(r.Context(), tx); err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = err.Error()
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["item"] = item
+		return respMap
+
 	default:
 		respMap["response"] = "error"
 		respMap["message"] = "unknown module: " + m

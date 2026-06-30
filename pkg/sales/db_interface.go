@@ -35,5 +35,10 @@ func GenTables() error {
 		log.Fatalln("failed to generate cash table err =", err)
 	}
 
+	err = genPaymentsTable()
+	if err != nil {
+		log.Fatalln("failed to generate till_payments table err =", err)
+	}
+
 	return err
 }

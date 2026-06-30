@@ -69,20 +69,22 @@ func genOrderTable() error {
 }
 
 // nextOrder fetches the next available order number
-func (ord *Order) NextOrder() error {
+func (ord *Order) NextOrder(ctx context.Context) error {
 	fmt.Println("\n\t\t ac_num =", ord.AcNum)
 	fmt.Println("\t\t poster =", ord.Poster)
 	fmt.Println("\t\t receipt =", ord.ReceiptNum)
 
 	// return nil
-	sql := `SELECT 
-				coalesce(max(order_num), 0) 
-			FROM salesorders 
-			WHERE state = 'pending' 
+	sql := `SELECT
+				coalesce(max(order_num), 0)
+			FROM salesorders
+			WHERE state = 'pending'
 				AND till_num = $2
 				AND receipt_num = $3`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, ord.Poster, ord.TillNum, ord.ReceiptNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, ord.Poster, ord.TillNum, ord.ReceiptNum)
 	if err != nil {
 		return err
 	}
@@ -134,7 +136,7 @@ func (ord *Order) NextOrderTX(ctx context.Context, tx pgx.Tx) error {
 // NewOrder generates a new sales order
 func (ord *Order) NewOrder(ctx context.Context) error {
 	var err error
-	err = ord.NextOrder()
+	err = ord.NextOrder(ctx)
 	if err != nil {
 		fmt.Println("error newOrder    err =", err)
 		return err
@@ -252,13 +254,15 @@ func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
 }
 
 // FetchOrderItems gets all items in order
-func (ord *Order) Fetchtems() error {
-	sql := `SELECT 
-				cast(coalesce(order_items::varchar, '[]') as varchar) 
-			FROM salesorders 
+func (ord *Order) Fetchtems(ctx context.Context) error {
+	sql := `SELECT
+				cast(coalesce(order_items::varchar, '[]') as varchar)
+			FROM salesorders
 			WHERE order_num = $1`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, ord.OrderNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, ord.OrderNum)
 	if err != nil {
 		log.Println("sql error, failed to query order items    err =", err)
 		return err
@@ -359,17 +363,19 @@ func (ord *Order) FetchtemsCtx(ctx context.Context, tx pgx.Tx) error {
 }
 
 // FetchPayingOrderItems gets all items in order
-func FetchPayingOrderItems(tillNum string) ([]Sales, error) {
+func FetchPayingOrderItems(ctx context.Context, tillNum string) ([]Sales, error) {
 	if tillNum == "" || tillNum == "00" {
 		return nil, fmt.Errorf("failed to fetch paying order till num")
 	}
-	sql := `SELECT 
-				cast(coalesce(order_items, '[]') as varchar) 
-			FROM salesorders 
+	sql := `SELECT
+				cast(coalesce(order_items, '[]') as varchar)
+			FROM salesorders
 			WHERE state = 'paying' AND till_num = $1`
 
 	var values []Sales
-	rows, err := db.PgPool.Query(context.Background(), sql, tillNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, tillNum)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +440,7 @@ func (arg *ReceiptLog) CombineOrdersInBill(ctx context.Context, tx pgx.Tx) error
 }
 
 // FetchActiveOrders gets all orders not paid yet
-func FetchActiveOrders(poster string) ([]Order, error) {
+func FetchActiveOrders(ctx context.Context, poster string) ([]Order, error) {
 	// userDetails, err := login.FetchUser(poster)
 	// if err != nil {
 	// 	return nil, err
@@ -445,17 +451,19 @@ func FetchActiveOrders(poster string) ([]Order, error) {
 	// 	state = `'pending', 'dispatched', 'paying'`
 	// }
 
-	sql := `SELECT 
+	sql := `SELECT
 				order_num
-				, poster 
+				, poster
 				, state
 				, ac_num
-			FROM salesorders 
+			FROM salesorders
 			WHERE state IN ('pending', 'dispatched', 'paying') AND till_num = (SELECT cast(till_num as bigint) FROM users WHERE username = $1)
 			ORDER BY trans_date ASC
 			`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, poster)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, poster)
 	if err != nil {
 		fmt.Println("failed to query orders.  error =", err)
 		return nil, err
@@ -476,23 +484,25 @@ func FetchActiveOrders(poster string) ([]Order, error) {
 }
 
 // FetchActiveOrders gets all orders not paid yet
-func FetchActiveOrdersInBill(receipt string) ([]Order, error) {
+func FetchActiveOrdersInBill(ctx context.Context, receipt string) ([]Order, error) {
 
 	sql := `SELECT
                 order_num
 	            , daily_count
-				, poster 
+				, poster
 				, state
 				, ac_num
 				, receipt_num
-			FROM salesorders 
-			WHERE 
-				state IN ('pending', 'dispatched', 'paying') AND 
+			FROM salesorders
+			WHERE
+				state IN ('pending', 'dispatched', 'paying') AND
 				receipt_num = $1
 			ORDER BY trans_date ASC
 			`
 
-	rows, err := db.PgPool.Query(context.Background(), sql, receipt)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, receipt)
 	if err != nil {
 		fmt.Println("failed to query orders.  error =", err)
 		return nil, err
@@ -513,8 +523,8 @@ func FetchActiveOrdersInBill(receipt string) ([]Order, error) {
 }
 
 // AddToOrder adds a new item to orders
-func (ord *Order) AddToOrder(args Sales) ([]Sales, float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (ord *Order) AddToOrder(ctx context.Context, args Sales) ([]Sales, float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if ord.ReceiptNum == 0 {
@@ -646,8 +656,8 @@ func OrderTotal(order []Sales) float64 {
 }
 
 // CompleteOrder completes an order
-func (ord *Order) CompleteOrder() ([]OrderItem, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (ord *Order) CompleteOrder(ctx context.Context) ([]OrderItem, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
@@ -768,7 +778,7 @@ func (ord *Order) VoucherCtx(ctx context.Context, tx pgx.Tx) ([]OrderItem, error
 // Queries salesorders table for all orders in a bill
 // Returns an array of orders
 func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	sql := `SELECT
@@ -825,24 +835,26 @@ func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
 }
 
 // OrderVoucher returns order details
-func OrderVoucher(orderNum string) ([]OrderItem, error) {
+func OrderVoucher(ctx context.Context, orderNum string) ([]OrderItem, error) {
 	sql := `SELECT items.item_name, SUM(items.quantity) as qty, items.price, SUM(items.quantity * items.price) as total
 				, items.order_num
-				, (SELECT poster FROM salesorders WHERE order_num = $1) 
+				, (SELECT poster FROM salesorders WHERE order_num = $1)
 				, (SELECT trans_date FROM salesorders WHERE order_num = $1)
-			FROM salesorders ord, jsonb_to_recordset(ord.order_items) as  
+			FROM salesorders ord, jsonb_to_recordset(ord.order_items) as
 				items(
 					item_code varchar
 					, item_name varchar
 					, quantity float
 					, price float
 					, order_num bigint
-					, state varchar 
+					, state varchar
 				)
 			WHERE ord.order_num = $1 AND items.state = 'pending'
 			GROUP BY items.item_name, items.price, items.order_num `
 
-	rows, err := db.PgPool.Query(context.Background(), sql, orderNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, orderNum)
 	if err != nil {
 		log.Println("error fetching order voucher err =", err)
 		return nil, err
@@ -864,16 +876,18 @@ func OrderVoucher(orderNum string) ([]OrderItem, error) {
 }
 
 // OrdIsDeletable checks if an order can be deleted
-func OrdIsDeletable(ordNum string) bool {
-	sql := `SELECT 
-				CASE 
+func OrdIsDeletable(ctx context.Context, ordNum string) bool {
+	sql := `SELECT
+				CASE
 					WHEN state = 'pending' THEN true
 					ELSE false
 				END as is_deletable
 			FROM salesorders WHERE order_num = $1`
 
 	var isDelete bool
-	rows, err := db.PgPool.Query(context.Background(), sql, ordNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := db.PgPool.Query(ctx, sql, ordNum)
 	if err != nil {
 		return false
 	}
@@ -887,8 +901,8 @@ func OrdIsDeletable(ordNum string) bool {
 }
 
 // DelOrderItem deletes an order item
-func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func DelOrderItem(ctx context.Context, orderItem, orderNum string) ([]Sales, float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
@@ -924,12 +938,12 @@ func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
 	fmt.Println("\n json string =", string(jStr))
 
 	// update order item
-	sql := `UPDATE salesorders 
-			SET order_items = $1 
-			WHERE order_num = $2 
+	sql := `UPDATE salesorders
+			SET order_items = $1
+			WHERE order_num = $2
 				AND state = 'pending'
 			RETURNING order_items::varchar `
-	rows, err := db.PgPool.Query(context.Background(), sql, string(jStr), orderNum)
+	rows, err := db.PgPool.Query(ctx, sql, string(jStr), orderNum)
 	if err != nil {
 		fmt.Println("error updaring order items error =", err)
 		return nil, 0, err
@@ -955,9 +969,68 @@ func DelOrderItem(orderItem, orderNum string) ([]Sales, float64, error) {
 	return cart, total, tx.Commit(ctx)
 }
 
+// UpdateOrderItemQty updates the quantity of a single order item in-place.
+func UpdateOrderItemQty(ctx context.Context, receiptItem, orderNum string, qty float64) ([]Sales, float64, error) {
+	if qty <= 0 {
+		return DelOrderItem(ctx, receiptItem, orderNum)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	ordNum, _ := strconv.ParseInt(orderNum, 10, 64)
+	ord := Order{OrderNum: ordNum}
+
+	if err = ord.FetchtemsCtx(ctx, tx); err != nil {
+		return nil, 0, err
+	}
+
+	for i, itm := range ord.OrderItems {
+		if itm.ReceiptItem == receiptItem && itm.State == "pending" {
+			ord.OrderItems[i].Quantity = qty
+			ord.OrderItems[i].Total = itm.Price * qty
+		}
+	}
+
+	jStr, err := json.Marshal(ord.OrderItems)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	sql := `UPDATE salesorders
+			SET order_items = $1
+			WHERE order_num = $2 AND state = 'pending'
+			RETURNING order_items::varchar`
+
+	rows, err := db.PgPool.Query(ctx, sql, string(jStr), orderNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var cart []Sales
+	for rows.Next() {
+		var s string
+		if err = rows.Scan(&s); err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(s), &cart)
+	}
+
+	total := OrderTotal(cart)
+	return cart, total, tx.Commit(ctx)
+}
+
 // SetOrderPay sets an order to paying
-func SetOrderPay(ordNum string, receipt int64) error {
-	ctx := context.Background()
+func SetOrderPay(ctx context.Context, ordNum string, receipt int64) error {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -1033,7 +1106,7 @@ func SetOrderPay(ordNum string, receipt int64) error {
 }
 
 // combines existing orders into a single bill
-func (arg *Order) CombineBill() error {
+func (arg *Order) CombineBill(ctxt context.Context) error {
 	var err error
 	var rcpt ReceiptLog
 
@@ -1041,7 +1114,7 @@ func (arg *Order) CombineBill() error {
 		rcpt.Poster = arg.Poster
 		rcpt.TillNum = arg.TillNum
 
-		err = rcpt.GenReceipt()
+		err = rcpt.GenReceipt(ctxt)
 		if err != nil {
 			return fmt.Errorf("sales.Order->CombineBill(). failed to get next open order")
 		}
@@ -1051,7 +1124,7 @@ func (arg *Order) CombineBill() error {
 		return fmt.Errorf("sales.Order->CombineBill(). order num is null")
 	}
 
-	err = arg.addOrderToReceipt()
+	err = arg.addOrderToReceipt(ctxt)
 	if err != nil {
 		return fmt.Errorf("sales.Order->CombineBill(). error combining orders")
 	}
@@ -1077,13 +1150,16 @@ func (arg *ReceiptLog) PendingOrdersInBill(ctx context.Context) bool {
 // addOrderToReceipt adds current order items into receipt
 // Updates receipt number to salesorders
 // returns an error if it fails
-func (arg *Order) addOrderToReceipt() error {
+func (arg *Order) addOrderToReceipt(ctxt context.Context) error {
 	sql := `UPDATE salesorders 
 			SET 
 				receipt = $1 
 			WHERE order_num = $2`
 
-	_, err := db.PgPool.Query(context.Background(), sql, arg.Receipt, arg.OrderNum)
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
+	_, err := db.PgPool.Query(ctx, sql, arg.Receipt, arg.OrderNum)
 	if err != nil {
 		log.Println("sales.Order->addOrderToReceipt()    error =", err)
 		return err
@@ -1092,8 +1168,9 @@ func (arg *Order) addOrderToReceipt() error {
 }
 
 // OrderToSales adds current order_items into sales_live
-func OrderToSales(orders []Sales, ords []string, receipt int64, username string) (float64, error) {
-	ctx := context.Background()
+func OrderToSales(ctx context.Context, orders []Sales, ords []string, receipt int64, username string) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -1134,15 +1211,15 @@ func OrderToSales(orders []Sales, ords []string, receipt int64, username string)
 }
 
 // OrdersToPay joins orders into sales
-func (arg *ReceiptLog) OrdersToPay(orders []string, receipt int64) error {
+func (arg *ReceiptLog) OrdersToPay(ctx context.Context, orders []string, receipt int64) error {
 
-	salesCarts, err := FetchPayingOrderItems(fmt.Sprintf("%v", arg.TillNum))
+	salesCarts, err := FetchPayingOrderItems(ctx, fmt.Sprintf("%v", arg.TillNum))
 	if err != nil {
 		log.Println("error. failed to fetch paying order items    err =", err)
 		return nil
 	}
 
-	_, err = OrderToSales(salesCarts, orders, receipt, arg.Poster)
+	_, err = OrderToSales(ctx, salesCarts, orders, receipt, arg.Poster)
 	if err != nil {
 		fmt.Println("failed order to sales err =", err)
 		return err
@@ -1152,8 +1229,8 @@ func (arg *ReceiptLog) OrdersToPay(orders []string, receipt int64) error {
 }
 
 // CloseBill joins orders in bill to sale
-func (arg *ReceiptLog) CloseBill() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+func (arg *ReceiptLog) CloseBill(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
 	tx, err := db.PgPool.BeginTx(ctx, pgx.TxOptions{})

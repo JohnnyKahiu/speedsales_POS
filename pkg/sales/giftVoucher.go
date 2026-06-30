@@ -30,7 +30,7 @@ func genGiftVoucherTbl() error {
 	return database.CreateFromStruct(tbl)
 }
 
-func (arg *GiftVoucher) Create() error {
+func (arg *GiftVoucher) Create(ctx context.Context) error {
 	if arg.Amount <= 0 {
 		return fmt.Errorf("no 0 amount gift voucher")
 	}
@@ -41,7 +41,9 @@ func (arg *GiftVoucher) Create() error {
 	sql := `INSERT INTO gift_voucher(serial, registerd_by, amount)
 			VALUES($1, $2, $3)`
 
-	_, err := database.PgPool.Exec(context.Background(), sql, arg.Serial, arg.RegisteredBY, arg.Amount)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	_, err := database.PgPool.Exec(ctx, sql, arg.Serial, arg.RegisteredBY, arg.Amount)
 	if err != nil {
 		log.Println("error. failed to create a new gift voucher     err =", err)
 		return err

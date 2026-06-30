@@ -129,8 +129,8 @@ func (arg *Till) GetTillNum(ctx context.Context, db DBPool) error {
 // OpenTill creates a new till
 // Updates logins a new till and returns the till number
 // returns an error if it fails
-func (arg *Till) OpenTill(db DBPool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (arg *Till) OpenTill(ctx context.Context, db DBPool) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if arg.Teller == "" || arg.Teller == "nan" {
@@ -169,12 +169,48 @@ func (arg *Till) OpenTill(db DBPool) error {
 	return nil
 }
 
+// TillExists checks if pending items exists in till
+// Selects cart / order from salestrace / salesorders
+// returns a boolean if true/false
+func (arg *Till) ItemsExistsInTill(ctxt context.Context) bool {
+	sql := `SELECT
+				CASE WHEN (COUNT(*) > 0) THEN true ELSE false END pending_exists
+			FROM (
+				SELECT 
+					s.trans_date
+					, s.pay_till
+					, s.till_num
+					, s.state
+					, COUNT(od.*) ord_items
+					, COUNT(s.cart) count_items
+				FROM salestrace s LEFT JOIN salesorders od ON s.receipt_num = od.receipt_num 
+				WHERE s.till_num = $1
+				GROUP BY s.trans_date, s.pay_till, s.till_num, s.state
+				ORDER BY s.trans_date DESC) as a
+			WHERE a.state IN ('pending', 'pending payment')`
+
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
+	exists := false
+	if err := database.PgPool.QueryRow(ctx, sql, arg.TillNO).Scan(&exists); err != nil {
+		log.Println("postgresql error. failed to fetch till     err =", err)
+		return false
+	}
+
+	return exists
+}
+
 // CloseTill closes an existing till
 // Updates close_time, close and cash summaries
 // returns an error if fails
 func (arg *Till) CloseTill(ctxt context.Context) error {
 	if arg.Supervisor == "" || arg.Supervisor == "nan" {
 		return errors.New("supervisor is required")
+	}
+
+	if arg.ItemsExistsInTill(ctxt) {
+		return errors.New("pending cart items in till")
 	}
 
 	// validate supervisor
@@ -190,7 +226,7 @@ func (arg *Till) CloseTill(ctxt context.Context) error {
 	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		log.Println("error. failed to begin db transaction")
-		return fmt.Errorf("internal error")
+		return errors.New("500.0. Internal server error")
 	}
 	defer tx.Rollback(ctx)
 
@@ -198,12 +234,23 @@ func (arg *Till) CloseTill(ctxt context.Context) error {
 	err = arg.updateCashSummary(ctx, tx)
 	if err != nil {
 		log.Println("failed to update cash_summary")
-		return fmt.Errorf("internal error")
+		return errors.New("500.1. Internal server error")
 	}
 
 	// remove till from login
+	arg.TillNO = 0
+	err = arg.UpdateTill(ctx)
+	if err != nil {
+		log.Println("failed to update till_num to users")
+		return errors.New("500.1. Internal server error")
+	}
+	fmt.Println("close till done successfully")
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		log.Println("pg error.    failed to commit txn    err =", err)
+		return errors.New("500.1. Internal server error")
+	}
+	return nil
 }
 
 // UpdateTill
@@ -247,10 +294,10 @@ func (arg *Till) updateCashSummary(ctx context.Context, tx pgx.Tx) error {
 				(
 					SELECT 
 						c.till_num
-						, coalesce(c.cash, 0) + coalesce(lay_payments.cash, 0) + coalesce(credit.cash, 0) total_cash
-						, coalesce(c.mpesa, 0) + coalesce(lay_payments.mpesa, 0) + coalesce(credit.mpesa, 0) total_mobile
-						, coalesce(c.ecard, 0) + coalesce(lay_payments.ecard, 0) + coalesce(credit.ecard, 0) total_ecards
-						, coalesce(c.cheque, 0) + coalesce(lay_payments.cheque, 0) + coalesce(credit.cheque, 0) total_cheques
+						, coalesce(c.cash, 0) + coalesce(credit.cash, 0) total_cash
+						, coalesce(c.mpesa, 0) + coalesce(credit.mpesa, 0) total_mobile
+						, coalesce(c.ecard, 0) + coalesce(credit.ecard, 0) total_ecards
+						, coalesce(c.cheque, 0) + coalesce(credit.cheque, 0) total_cheques
 						, c.redeemed
 						, coalesce(rolls.amount, 0) as cash_outs
 						, coalesce(rets.amount, 0) as returns
@@ -272,44 +319,15 @@ func (arg *Till) updateCashSummary(ctx context.Context, tx pgx.Tx) error {
 					(SELECT till_num, SUM(total) amount FROM salestrace WHERE state = 'RETURN' GROUP BY till_num) as rets
 									ON rets.till_num = c.till_num
 						LEFT JOIN
-					(SELECT till_num, coalesce(SUM(cash_paid), 0) as cash, coalesce(SUM(mpesa_paid), 0) as mpesa
-						, coalesce(SUM(ecard_paid), 0) as ecard, coalesce(SUM(cheque_paid), 0) as cheque
+					(SELECT till_num
+						, coalesce(SUM(cast(pay_details->'cash' as varchar)::float), 0) as cash
+						, coalesce(SUM(cast(pay_details->'mpesa' as varchar)::float), 0) as mpesa
+						, coalesce(SUM(cast(pay_details->'ecard' as varchar)::float), 0) as ecard
+						, coalesce(SUM(cast(pay_details->'check' as varchar)::float), 0) as cheque
 						, coalesce(SUM(amount), 0) total_sales
 					FROM accounts_txn GROUP BY till_num) as credit
 						ON c.till_num = credit.till_num
-							LEFT JOIN
-					(SELECT
-							t.till_no as till_num
-							, cash.amount as cash
-							, mpesa.amount as mpesa
-							, ecards.amount as ecard
-							, cheque.amount as cheque
-						FROM
-						(SELECT till_no FROM sales_till) as t
-							LEFT JOIN
-						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount
-							FROM laybye_trans
-						WHERE trans_type = 'payment' AND pay_type = 'cash' GROUP BY till_num) as cash
-							ON t.till_no = cash.till_num
-							LEFT JOIN
-
-						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount
-							FROM laybye_trans 
-						WHERE trans_type = 'payment' AND pay_type = 'mpesa' GROUP BY till_num) as mpesa
-							ON t.till_no = mpesa.till_num
-							LEFT JOIN
-
-						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount 
-							FROM laybye_trans 
-						WHERE trans_type = 'payment' AND pay_type = 'ecard' GROUP BY till_num) as ecards
-							ON t.till_no = mpesa.till_num
-							LEFT JOIN
-
-						(SELECT till_num, coalesce(sum(amount_paid), 0) as amount 
-							FROM laybye_trans 
-						WHERE trans_type = 'payment' AND pay_type = 'cheque' GROUP BY till_num) as cheque
-							ON t.till_no = mpesa.till_num) as lay_payments
-						ON lay_payments.till_num = c.till_num
+				
 				) as a
 			WHERE st.till_no::varchar = $1			
 			`

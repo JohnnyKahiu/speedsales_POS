@@ -3,6 +3,7 @@ package sales
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,42 +15,44 @@ import (
 
 // ReceiptLog holds receipt traces
 type ReceiptLog struct {
-	table           string                 `name:"salestrace" type:"table"`
-	TransDate       time.Time              `json:"trans_date" name:"trans_date" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
-	ReceiptNum      int64                  `json:"receipt_num" name:"receipt_num" type:"field" sql:"BIGINT PRIMARY KEY"`
-	TillNum         int64                  `json:"till_num" name:"till_num" type:"field" sql:"BIGINT NOT NULL"`
-	PayTill         int64                  `json:"pay_till" name:"pay_till" type:"field" sql:"BIGINT NOT NULL"`
-	CompanyID       int64                  `json:"company_id" name:"company_id" type:"field" sql:"BIGINT"`
-	DailyCount      int32                  `json:"daily_count" name:"daily_count" type:"field" sql:"INT"`
-	Branch          string                 `json:"branch" name:"branch" type:"field" sql:"VARCHAR"`
-	Poster          string                 `json:"poster" name:"poster" type:"field" sql:"VARCHAR"`
-	Total           float32                `json:"total" name:"total" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
-	Cash            float32                `json:"cash" name:"cash" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
-	Change          float32                `json:"change" name:"change" type:"field" sql:"FLOAT"`
-	MpesaDetails    []MpesaDetails         `json:"mpesa_details" name:"mpesa_details" type:"field" sql:"JSONB"`
-	Loyalty         map[string]string      `json:"loyalty" name:"loyalty" type:"field" sql:"JSONB"`
-	Paymode         string                 `json:"paymode" name:"paymode" type:"field" sql:"VARCHAR"`
-	SaleType        string                 `json:"sale_type" name:"sale_type" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'Cash Sale'"`
-	Cart            []Sales                `json:"cart" name:"cart" type:"field" sql:"JSONB"`
-	CashBal         float64                `json:"cash_bal" name:"cash_bal" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
-	State           string                 `json:"state" name:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
-	Approver        string                 `json:"approver" name:"approver" type:"field" sql:"VARCHAR(100) NOT NULL DEFAULT 'nan'"`
-	MirroredBy      []string               `json:"mirrored_by" name:"mirrored_by" type:"field"  sql:"VARCHAR[]"`
-	LaybyeID        int64                  `json:"laybye_id" name:"laybye_id" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
-	PayDetails      string                 `json:"pay_details" name:"pay_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{}' "`
-	MpesaTxn        string                 `json:"mpesa_txn" name:"mpesa_txn" type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
-	EtrSeal         string                 `json:"etr_seal" name:"etr_seal" type:"field" sql:"VARCHAR" `
-	SyncServers     string                 `json:"sync_servers" name:"sync_servers" type:"field" sql:"VARCHAR[] NOT NULL DEFAULT '{}'"`
-	LastUpdated     time.Time              `json:"last_updated" name:"last_updated" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
-	OrdersInBill    int                    `json:"orders_in_bill" name:"orders_in_bill" type:"field" sql:"INT NOT NULL DEFAULT '0'"`
-	CreditDetails   []Account              `json:"credit_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{\"ac_name\":\"\", \"ac_num\":-1, \"amount\":0, \"approver\":\"\"}'"`
-	Etr             ETR                    `json:"etr" name:"etr" type:"field" sql:"JSONB"`
-	ReturnTrace     int64                  `json:"return_trace" name:"return_trace" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
-	Analysis        map[string]interface{} `json:"analysis" name:"analysis" type:"field" sql:"JSONB"`
-	AcNum           string                 `json:"ac_num" name:"ac_num" type:"field" sql:"VARCHAR"`
-	Token           string                 `json:"token"`
-	constraint      string                 `name:"" type:"field" sql:"CONSTRAINT fk_salestrace_till_num FOREIGN KEY (till_num) REFERENCES sales_till(till_no)"`
-	debtoronstraint string                 `name:"" type:"field" sql:"CONSTRAINT fk_debtors_acnum FOREIGN KEY (ac_num) REFERENCES debtors(ac_num)"`
+	table            string                 `name:"salestrace" type:"table"`
+	TransDate        time.Time              `json:"trans_date" name:"trans_date" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	ReceiptNum       int64                  `json:"receipt_num" name:"receipt_num" type:"field" sql:"BIGINT PRIMARY KEY"`
+	TillNum          int64                  `json:"till_num" name:"till_num" type:"field" sql:"BIGINT NOT NULL"`
+	PayTill          int64                  `json:"pay_till" name:"pay_till" type:"field" sql:"BIGINT NOT NULL"`
+	CompanyID        int64                  `json:"company_id" name:"company_id" type:"field" sql:"BIGINT"`
+	DailyCount       int32                  `json:"daily_count" name:"daily_count" type:"field" sql:"INT"`
+	Branch           string                 `json:"branch" name:"branch" type:"field" sql:"VARCHAR"`
+	Poster           string                 `json:"poster" name:"poster" type:"field" sql:"VARCHAR"`
+	Total            float32                `json:"total" name:"total" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
+	Cash             float32                `json:"cash" name:"cash" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
+	Change           float32                `json:"change" name:"change" type:"field" sql:"FLOAT"`
+	MpesaDetails     []MpesaDetails         `json:"mpesa_details" name:"mpesa_details" type:"field" sql:"JSONB"`
+	Loyalty          map[string]string      `json:"loyalty" name:"loyalty" type:"field" sql:"JSONB"`
+	Paymode          string                 `json:"paymode" name:"paymode" type:"field" sql:"VARCHAR"`
+	SaleType         string                 `json:"sale_type" name:"sale_type" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'Cash Sale'"`
+	Cart             []Sales                `json:"cart" name:"cart" type:"field" sql:"JSONB"`
+	CashBal          float64                `json:"cash_bal" name:"cash_bal" type:"field" sql:"FLOAT NOT NULL DEFAULT '0'"`
+	State            string                 `json:"state" name:"state" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'pending'"`
+	Approver         string                 `json:"approver" name:"approver" type:"field" sql:"VARCHAR(100) NOT NULL DEFAULT 'nan'"`
+	Reason           string                 `json:"reason" name:"reason" type:"field" sql:"VARCHAR(500) NOT NULL DEFAULT 'nan'"`
+	MirroredBy       []string               `json:"mirrored_by" name:"mirrored_by" type:"field"  sql:"VARCHAR[]"`
+	LaybyeID         int64                  `json:"laybye_id" name:"laybye_id" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
+	PayDetails       string                 `json:"pay_details" name:"pay_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{}' "`
+	MpesaTxn         string                 `json:"mpesa_txn" name:"mpesa_txn" type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
+	EtrSeal          string                 `json:"etr_seal" name:"etr_seal" type:"field" sql:"VARCHAR" `
+	SyncServers      string                 `json:"sync_servers" name:"sync_servers" type:"field" sql:"VARCHAR[] NOT NULL DEFAULT '{}'"`
+	LastUpdated      time.Time              `json:"last_updated" name:"last_updated" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	OrdersInBill     int                    `json:"orders_in_bill" name:"orders_in_bill" type:"field" sql:"INT NOT NULL DEFAULT '0'"`
+	CreditDetails    []Account              `json:"credit_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{\"ac_name\":\"\", \"ac_num\":-1, \"amount\":0, \"approver\":\"\"}'"`
+	Etr              ETR                    `json:"etr" name:"etr" type:"field" sql:"JSONB"`
+	ReturnTrace      int64                  `json:"return_trace" name:"return_trace" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
+	Analysis         map[string]interface{} `json:"analysis" name:"analysis" type:"field" sql:"JSONB"`
+	AcNum            string                 `json:"ac_num" name:"ac_num" type:"field" sql:"VARCHAR"`
+	CustName         string                 `json:"cust_name" name:"ac_num" type:"field" sql:"VARCHAR NOT NULL DEFAULT 'walk in'"`
+	Token            string                 `json:"token"`
+	constraint       string                 `name:"" type:"field" sql:"CONSTRAINT fk_salestrace_till_num FOREIGN KEY (till_num) REFERENCES sales_till(till_no)"`
+	debtorconstraint string                 `name:"" type:"field" sql:"CONSTRAINT fk_debtors_acnum FOREIGN KEY (ac_num) REFERENCES debtors(ac_num)"`
 }
 
 func genReceiptTbl() error {
@@ -57,8 +60,30 @@ func genReceiptTbl() error {
 	return database.CreateFromStruct(tblStruct)
 }
 
+func (arg *ReceiptLog) CheckIfExists(ctxt context.Context) error {
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
+	sql := `
+			SELECT 
+				coalesce(max(receipt_num), 0) 
+			FROM salestrace 
+			WHERE state in ('pending', 'paying')
+				AND till_num = $1
+				AND sale_type = $2
+				AND cust_name = $3`
+
+	// Query database rows
+	if err := database.PgPool.QueryRow(ctx, sql, arg.TillNum, arg.SaleType, arg.CustName).Scan(&arg.ReceiptNum); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // GenReceipt creates or returns next available sales receipt
-func (arg *ReceiptLog) GenReceipt() error {
+func (arg *ReceiptLog) GenReceipt(ctxt context.Context) error {
+	var err error
 	start := time.Now()
 	fmt.Println("sale type =", arg.SaleType)
 	fmt.Println("laybye id =", arg.LaybyeID)
@@ -69,27 +94,15 @@ func (arg *ReceiptLog) GenReceipt() error {
 	}
 
 	fmt.Println("Gen Receipt for till num =", arg.TillNum)
-	// get all active receipts for current user
-	sql := `
-			SELECT 
-				coalesce(max(receipt_num), 0) 
-			FROM salestrace 
-			WHERE state in ('pending', 'paying')
-				AND till_num = $1
-				AND sale_type = $2`
 
-	// Query database rows
-	rows, err := database.PgPool.Query(context.Background(), sql, arg.TillNum, arg.SaleType)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	// scan rows
-	for rows.Next() {
-		rows.Scan(&arg.ReceiptNum)
+	if arg.CustName == "" {
+		arg.CustName = "walk in"
 	}
 
+	// fetch next open receipt if exists
+	if err = arg.CheckIfExists(ctxt); err != nil {
+		return errors.New("pg error. failed checking error")
+	}
 	fmt.Println("Gen Receipt num =", arg.ReceiptNum)
 	// return receipt number when there exists a pending receipt number
 	if arg.ReceiptNum > 0 {
@@ -99,7 +112,7 @@ func (arg *ReceiptLog) GenReceipt() error {
 	}
 
 	// create a new receipt number
-	arg.ReceiptNum, err = arg.CreateReceipt()
+	arg.ReceiptNum, err = arg.CreateReceipt(ctxt)
 	fmt.Printf("\nreceipt = %v\n", arg.ReceiptNum)
 	if err != nil {
 		fmt.Printf("Error creating receipt %v\n", err.Error())
@@ -110,7 +123,7 @@ func (arg *ReceiptLog) GenReceipt() error {
 }
 
 // GenReceipt creates or returns next available sales receipt
-func (arg *ReceiptLog) Fetch() error {
+func (arg *ReceiptLog) Fetch(ctx context.Context) error {
 	start := time.Now()
 	defer fmt.Printf("GenReceipt took %v", time.Since(start))
 
@@ -137,8 +150,10 @@ func (arg *ReceiptLog) Fetch() error {
 			FROM salestrace
 			WHERE receipt_num = $1`
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	// Query database rows
-	rows, err := database.PgPool.Query(context.Background(), sql, arg.ReceiptNum)
+	rows, err := database.PgPool.Query(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		fmt.Printf("operation error \n%v", err.Error())
 		return err
@@ -182,7 +197,7 @@ func (arg *ReceiptLog) Fetch() error {
 }
 
 // FetchAll creates or returns next available sales receipt
-func (arg *ReceiptLog) FetchAll() error {
+func (arg *ReceiptLog) FetchAll(ctx context.Context) error {
 	start := time.Now()
 	defer fmt.Printf("GenReceipt took %v", time.Since(start))
 
@@ -200,8 +215,10 @@ func (arg *ReceiptLog) FetchAll() error {
 			FROM salestrace
 			WHERE receipt_num = $1`
 
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	// Query database rows
-	rows, err := database.PgPool.Query(context.Background(), sql, arg.ReceiptNum)
+	rows, err := database.PgPool.Query(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		fmt.Printf("operation error \n%v", err.Error())
 		return err
@@ -253,8 +270,8 @@ func (arg *ReceiptLog) FetchAll() error {
 	return nil
 }
 
-func (arg *ReceiptLog) Archive() error {
-	err := arg.FetchAll()
+func (arg *ReceiptLog) Archive(ctx context.Context) error {
+	err := arg.FetchAll(ctx)
 	if err != nil {
 		return err
 	}
@@ -266,23 +283,48 @@ func (arg *ReceiptLog) FetchRange() error {
 	return nil
 }
 
-func (arg *ReceiptLog) GetActiveCarts() ([]ReceiptLog, error) {
+// AddCart persists the current Cart slice to the salestrace row identified by ReceiptNum.
+func (arg *ReceiptLog) AddCart(ctxt context.Context) error {
+	sql := `UPDATE salestrace SET cart = $1 WHERE receipt_num = $2`
+
+	ctx, cancel := context.WithTimeout(ctxt, 30*time.Second)
+	defer cancel()
+
+	cartJSON, err := json.Marshal(arg.Cart)
+	if err != nil {
+		return err
+	}
+
+	_, err = database.PgPool.Exec(ctx, sql, string(cartJSON), arg.ReceiptNum)
+	if err != nil {
+		log.Println("postgresql error. failed to add items to cart.     err = ", err)
+		return err
+	}
+
+	return nil
+}
+
+func (arg *ReceiptLog) GetActiveCarts(ctxt context.Context) ([]ReceiptLog, error) {
 	activeRcpts := []ReceiptLog{}
 
-	sql := `SELECT 
+	sql := `SELECT
 				receipt_num
 				, daily_count
-				, state 
+				, state
 				, coalesce(cart::varchar, '{}')
 				, trans_date
+				, coalesce(cust_name, 'walk_in')
 			FROM salestrace
-			WHERE state in ('pending', 'paying', 'suspend') 
-			    AND till_num = $1 
+			WHERE state in ('pending', 'paying', 'suspend')
+			    AND till_num = $1
 			GROUP BY receipt_num
 			ORDER BY trans_date ASC`
 
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
 	// Query database rows
-	rows, err := database.PgPool.Query(context.Background(), sql, arg.TillNum)
+	rows, err := database.PgPool.Query(ctx, sql, arg.TillNum)
 	if err != nil {
 		log.Printf("operation error \n%v", err.Error())
 		return activeRcpts, err
@@ -294,7 +336,7 @@ func (arg *ReceiptLog) GetActiveCarts() ([]ReceiptLog, error) {
 		r := ReceiptLog{}
 		cart := ""
 
-		err := rows.Scan(&r.ReceiptNum, &r.DailyCount, &r.State, &cart, &r.TransDate)
+		err := rows.Scan(&r.ReceiptNum, &r.DailyCount, &r.State, &cart, &r.TransDate, &r.CustName)
 		if err != nil {
 			log.Println("error failed to scan receipt    err =", err)
 			return []ReceiptLog{}, err
@@ -306,10 +348,12 @@ func (arg *ReceiptLog) GetActiveCarts() ([]ReceiptLog, error) {
 	return activeRcpts, nil
 }
 
-func (arg *ReceiptLog) GetEmpty() (int, error) {
+func (arg *ReceiptLog) GetEmpty(ctx context.Context) (int, error) {
 	sql := `SELECT count(*) FROM salestrace WHERE receipt_num = $1 AND cart IS NULL`
 
-	rows, err := database.PgPool.Query(context.Background(), sql, arg.ReceiptNum)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	rows, err := database.PgPool.Query(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		return 0, err
 	}
@@ -326,14 +370,83 @@ func (arg *ReceiptLog) GetEmpty() (int, error) {
 	return counted, nil
 }
 
-func (arg *ReceiptLog) Delete() error {
+func (arg *ReceiptLog) Delete(ctx context.Context) error {
 	sql := `UPDATE salestrace SET state = 'VOIDED' WHERE receipt_num = $1 AND state not in ('POSTED', 'DEBITED', 'CREDITED', 'PAID', 'AWAITING RECEIPT')`
 
-	_, err := database.PgPool.Exec(context.Background(), sql, arg.ReceiptNum)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	_, err := database.PgPool.Exec(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		return fmt.Errorf("failed to void receipt")
 	}
 	return nil
+}
+
+// VoidWithReason voids a receipt and records the approver and reason.
+func (arg *ReceiptLog) VoidWithReason(ctx context.Context) error {
+	if arg.ReceiptNum == 0 {
+		return fmt.Errorf("receipt number is required")
+	}
+	if arg.Approver == "" {
+		return fmt.Errorf("approver is required")
+	}
+	reason := arg.Reason
+	if reason == "" {
+		reason = "nan"
+	}
+
+	// ensure the reason column exists (idempotent migration)
+	_, _ = database.PgPool.Exec(ctx,
+		`ALTER TABLE salestrace ADD COLUMN IF NOT EXISTS reason VARCHAR(500) NOT NULL DEFAULT 'nan'`)
+
+	// fetch current state to give a precise error if blocked
+	var currentState string
+	stateRow := database.PgPool.QueryRow(ctx,
+		`SELECT state FROM salestrace WHERE receipt_num = $1`, arg.ReceiptNum)
+	if err := stateRow.Scan(&currentState); err != nil {
+		return fmt.Errorf("receipt not found")
+	}
+	switch currentState {
+	case "POSTED", "PAID", "CREDITED":
+		return fmt.Errorf("cannot void a receipt in '%s' state", currentState)
+	}
+
+	sql := `UPDATE salestrace
+			SET state    = 'VOIDED',
+			    approver = $2,
+			    reason   = $3
+			WHERE receipt_num = $1
+			  AND state NOT IN ('POSTED', 'PAID', 'CREDITED')`
+
+	tag, err := database.PgPool.Exec(ctx, sql, arg.ReceiptNum, arg.Approver, reason)
+	if err != nil {
+		return fmt.Errorf("failed to void receipt: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("receipt could not be voided")
+	}
+	return nil
+}
+
+// GetApprovers returns usernames of users with approve_sales = true on the same branch.
+func GetApprovers(ctx context.Context, branch string) ([]string, error) {
+	sql := `SELECT username FROM users WHERE approve_sales = true AND branch = $1 ORDER BY username`
+
+	rows, err := database.PgPool.Query(ctx, sql, branch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var approvers []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			continue
+		}
+		approvers = append(approvers, u)
+	}
+	return approvers, nil
 }
 
 func (arg *ReceiptLog) DeleteCtx(ctx context.Context, tx pgx.Tx) error {
@@ -356,9 +469,7 @@ func (arg *ReceiptLog) DelOrderCtx(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func (arg *ReceiptLog) DelCascade() error {
-	ctx := context.Background()
-
+func (arg *ReceiptLog) DelCascade(ctx context.Context) error {
 	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -378,11 +489,59 @@ func (arg *ReceiptLog) DelCascade() error {
 	return tx.Commit(ctx)
 }
 
-func (arg *ReceiptLog) Suspend() error {
-	sql := `UPDATE salestrace SET state = 'suspend' 
+// DeleteCartItem marks a single cart line as DELETED by its receipt_item ID.
+// It locates the receipt via JSONB containment so the caller only needs receipt_item — no receipt_num required.
+func (arg *ReceiptLog) DeleteCartItem(ctx context.Context, receiptItem string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// find the receipt that holds this cart item
+	findSQL := `SELECT receipt_num, coalesce(cart::varchar, '[]')
+				FROM salestrace
+				WHERE cart @> $1::jsonb
+				  AND state NOT IN ('VOIDED', 'POSTED', 'DEBITED', 'CREDITED', 'PAID')
+				LIMIT 1`
+
+	needle, _ := json.Marshal([]map[string]string{{"receipt_item": receiptItem}})
+
+	row := database.PgPool.QueryRow(ctx, findSQL, string(needle))
+	cartStr := ""
+	if err := row.Scan(&arg.ReceiptNum, &cartStr); err != nil {
+		log.Println("DeleteCartItem: item not found    err =", err)
+		return fmt.Errorf("cart item not found")
+	}
+
+	// unmarshal all items (including already-deleted ones)
+	var cart []Sales
+	if err := json.Unmarshal([]byte(cartStr), &cart); err != nil {
+		return err
+	}
+
+	// mark the matching item as DELETED
+	found := false
+	for i, item := range cart {
+		if item.ReceiptItem == receiptItem {
+			cart[i].State = "DELETED"
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("cart item not found")
+	}
+
+	// write the cart back
+	arg.Cart = cart
+	return arg.AddCart(ctx)
+}
+
+func (arg *ReceiptLog) Suspend(ctx context.Context) error {
+	sql := `UPDATE salestrace SET state = 'suspend'
 			WHERE till_num = $1 AND state = 'pending' AND cart IS NOT NULL `
 
-	_, err := database.PgPool.Exec(context.Background(), sql, arg.TillNum)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	_, err := database.PgPool.Exec(ctx, sql, arg.TillNum)
 	if err != nil {
 		log.Println("suspend error ", err)
 		return err
@@ -390,23 +549,25 @@ func (arg *ReceiptLog) Suspend() error {
 	return nil
 }
 
-func (arg *ReceiptLog) NewBill() error {
+func (arg *ReceiptLog) NewBill(ctx context.Context) error {
 	sql := `UPDATE salestrace st
 			SET
 				state = 'suspend'
 			FROM(
-				SELECT 
+				SELECT
 					s.receipt_num
 					, count(so.order_num) orders_in_bill
 				FROM salestrace s LEFT JOIN salesorders so ON so.receipt_num = s.receipt_num
-				WHERE s.state = 'pending' 
+				WHERE s.state = 'pending'
 					AND (so.order_items IS NOT NULL OR s.cart IS NOT NULL)
 					AND s.till_num = $1
 				GROUP BY s.receipt_num) as a
 			WHERE st.receipt_num = a.receipt_num
 		`
 
-	_, err := database.PgPool.Exec(context.Background(), sql, arg.TillNum)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	_, err := database.PgPool.Exec(ctx, sql, arg.TillNum)
 	if err != nil {
 		log.Println("suspend error ", err)
 		return err
@@ -443,8 +604,7 @@ func (arg *ReceiptLog) ResumeBillContext(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func (arg *ReceiptLog) Resume() error {
-	ctx := context.Background()
+func (arg *ReceiptLog) Resume(ctx context.Context) error {
 	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -465,8 +625,7 @@ func (arg *ReceiptLog) Resume() error {
 	return nil
 }
 
-func (arg *ReceiptLog) Merge(receipts []int64) error {
-	ctx := context.Background()
+func (arg *ReceiptLog) Merge(ctx context.Context, receipts []int64) error {
 	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -510,6 +669,11 @@ func (arg *ReceiptLog) Merge(receipts []int64) error {
 func (arg *ReceiptLog) CombineOrdersContext(receiptCombo string, ctx context.Context, tx pgx.Tx) error {
 	sql := fmt.Sprintf(`UPDATE salesorders SET receipt_num = $1, state = 'paying' WHERE state not IN ('pending', 'voided', 'VOIDED', 'DELETED') AND receipt_num IN %v`, receiptCombo)
 
+	fmt.Println(sql)
+	fmt.Printf("\n\n\n")
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	_, err := tx.Exec(ctx, sql, arg.ReceiptNum)
 	if err != nil {
 		fmt.Println("sql error CombineOrdersContext()    err =", err)
@@ -521,6 +685,9 @@ func (arg *ReceiptLog) CombineOrdersContext(receiptCombo string, ctx context.Con
 
 func (arg *ReceiptLog) VoidReceiptsContext(receiptCombo string, ctx context.Context, tx pgx.Tx) error {
 	sql := fmt.Sprintf(`UPDATE salestrace SET state = 'VOIDED' WHERE receipt_num IN %v`, receiptCombo)
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	_, err := tx.Exec(ctx, sql)
 	if err != nil {
@@ -540,6 +707,9 @@ func (arg *ReceiptLog) GetNewOrderItems(ctx context.Context, tx pgx.Tx) error {
 				cast(coalesce(order_items, '[]') as varchar) 
 			FROM salesorders 
 			WHERE state in ('paying', 'pending payment') AND receipt_num = $1`
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	// var values []Sales
 	rows, err := tx.Query(ctx, sql, arg.ReceiptNum)
@@ -590,7 +760,7 @@ func (arg *ReceiptLog) CombineReceiptsContext(ctx context.Context, tx pgx.Tx) er
 		}
 	}
 
-	_, err = tx.Exec(ctx, sql, items, arg.Total, arg.ReceiptNum)
+	_, err = tx.Exec(ctx, sql, string(items), arg.Total, arg.ReceiptNum)
 	if err != nil {
 		fmt.Println("sql error CombineReceiptsContext()    err =", err)
 		return err
@@ -599,8 +769,8 @@ func (arg *ReceiptLog) CombineReceiptsContext(ctx context.Context, tx pgx.Tx) er
 	return nil
 }
 
-func (arg *ReceiptLog) CommitSaleCtx(ctx context.Context, tx pgx.Tx) error {
-	err := arg.Fetch()
+func (arg *ReceiptLog) CommitSaleCtx(ctxt context.Context, tx pgx.Tx) error {
+	err := arg.Fetch(ctxt)
 	if err != nil {
 		return err
 	}
@@ -616,6 +786,9 @@ func (arg *ReceiptLog) CommitSaleCtx(ctx context.Context, tx pgx.Tx) error {
 	analysis, _ := json.Marshal(arg.Analysis)
 	fmt.Printf("%s", analysis)
 
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
 	_, err = tx.Exec(ctx, sql, arg.Total, analysis, arg.ReceiptNum)
 	if err != nil {
 		return err
@@ -625,8 +798,8 @@ func (arg *ReceiptLog) CommitSaleCtx(ctx context.Context, tx pgx.Tx) error {
 }
 
 // Summarize: gives an analysis of how much time was taken
-func (arg *ReceiptLog) Analyze() error {
-	err := arg.Fetch()
+func (arg *ReceiptLog) Analyze(ctx context.Context) error {
+	err := arg.Fetch(ctx)
 	if err != nil {
 		return err
 	}
@@ -675,9 +848,9 @@ func (arg *ReceiptLog) GetPayingRcpts(ctxt context.Context) ([]ReceiptLog, error
 				, total
 				, coalesce(cart::varchar, '[{}]')
 				, state
-								
+				, coalesce(cust_name, 'walk_in')
 			FROM salestrace as sm
-			WHERE state in ('paying', 'pending payment')  /*AND trans_date::date < now()::date*/ 	AND branch = $1
+			WHERE state in ('paying', 'pending payment') AND branch = $1
 			ORDER BY last_updated ASC`
 
 	ctx, cancel := context.WithTimeout(ctxt, 20*time.Second)
@@ -695,7 +868,7 @@ func (arg *ReceiptLog) GetPayingRcpts(ctxt context.Context) ([]ReceiptLog, error
 		var r ReceiptLog
 
 		cartStr := ""
-		err = rows.Scan(&r.TransDate, &r.TillNum, &r.ReceiptNum, &r.Branch, &r.Poster, &r.Total, &cartStr, &r.State)
+		err = rows.Scan(&r.TransDate, &r.TillNum, &r.ReceiptNum, &r.Branch, &r.Poster, &r.Total, &cartStr, &r.State, &r.CustName)
 		if err != nil {
 			log.Println("failed to scan rows    err =", err)
 			return nil, err

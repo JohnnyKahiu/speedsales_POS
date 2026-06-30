@@ -48,25 +48,26 @@ var fetchUser = func(u *logins.Users, ctx context.Context) error {
 // AddCart adds an item to the cart
 // writes through to cache
 // returns an error if fails
-func (arg *Sales) AddCart() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (arg *Sales) AddCart(ctxt context.Context) ([]Sales, error) {
+	ctx, cancel := context.WithTimeout(ctxt, 30*time.Second)
 	defer cancel()
 
 	// fetch from details from inventory microservice
 	p := products.StockMaster{ItemCode: arg.ItemCode}
 	err := p.Fetch(ctx)
 	if err != nil {
-		return err
+		return []Sales{}, err
 	}
 
 	// validate p
 	if p.ItemCode == "" {
-		return errors.New("item code is required")
+		return []Sales{}, errors.New("item code is required")
 	}
 	if p.TillPrice == 0 {
-		return errors.New("item price is required")
+		return []Sales{}, errors.New("item price is required")
 	}
 
+	arg.ItemName = p.ItemName
 	arg.TransDate = time.Now()
 	arg.Cost = p.ItemCost
 	arg.Total = arg.Quantity * arg.Price
@@ -75,17 +76,42 @@ func (arg *Sales) AddCart() error {
 	arg.VatAlpha = p.VatAlpha
 	// create a unique ReceiptItem for entry
 	arg.ReceiptItem = fmt.Sprintf("%d", time.Now().UnixNano())
+	arg.State = "pending"
 
 	// add to in memory fileDB esp one in use
+	cart, err := arg.recordCart(ctxt)
+	if err != nil {
+		log.Println("error.  failed to record cart    err =", err)
+		return []Sales{}, err
+	}
 
-	log.Println("product details = ", p)
+	return cart, nil
+}
 
-	return nil
+// recordCart
+func (arg *Sales) recordCart(ctxt context.Context) ([]Sales, error) {
+	rcpt := ReceiptLog{ReceiptNum: arg.ReceiptNum}
+	if err := rcpt.Fetch(ctxt); err != nil {
+		return []Sales{}, err
+	}
+
+	// cart := rcpt.Cart
+	rcpt.Cart = append(rcpt.Cart, *arg)
+	for _, n := range rcpt.Cart {
+		fmt.Printf("row = %s\n", n)
+	}
+	fmt.Println("\n")
+
+	if err := rcpt.AddCart(ctxt); err != nil {
+		return []Sales{}, err
+	}
+
+	return rcpt.Cart, nil
 }
 
 // CreateReceipt creates a new receipt number
-func (arg *ReceiptLog) CreateReceipt() (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (arg *ReceiptLog) CreateReceipt(ctx context.Context) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	userDetails := logins.Users{Username: arg.Poster}
@@ -137,12 +163,17 @@ func (arg *ReceiptLog) CreateReceipt() (int64, error) {
 func (a *ReceiptLog) LogReceipt(ctx context.Context) error {
 	fmt.Printf("\n\treceipt logged = %v, %v, %v, %v, %v, %v, %v, %v ", a.TillNum, a.ReceiptNum, a.Poster, a.DailyCount, a.Branch, a.CompanyID, a.SaleType, a.LaybyeID)
 
+	custName := a.CustName
+	if custName == "" {
+		custName = "walk_in"
+	}
+
 	// prepare sql to insert new receipt number
-	sql := `INSERT INTO salestrace(trans_date, till_num, receipt_num, poster, daily_count, branch, company_id, sale_type, laybye_id, pay_till) 
-			VALUES(now(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+	sql := `INSERT INTO salestrace(trans_date, till_num, receipt_num, poster, daily_count, branch, company_id, sale_type, laybye_id, pay_till, cust_name)
+			VALUES(now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING trans_date`
 	// execute statement
-	rows, err := database.PgPool.Query(ctx, sql, a.TillNum, a.ReceiptNum, a.Poster, a.DailyCount, a.Branch, a.CompanyID, a.SaleType, a.LaybyeID, a.PayTill)
+	rows, err := database.PgPool.Query(ctx, sql, a.TillNum, a.ReceiptNum, a.Poster, a.DailyCount, a.Branch, a.CompanyID, a.SaleType, a.LaybyeID, a.PayTill, custName)
 	if err != nil {
 		log.Println("error. failed to save receipt to log     err =", err)
 		return err
@@ -159,8 +190,8 @@ func (a *ReceiptLog) LogReceipt(ctx context.Context) error {
 }
 
 // CashInTill fetches and returns total cash in current till
-func CashInTill(till int64) (float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+func CashInTill(ctx context.Context, till int64) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	start := time.Now()

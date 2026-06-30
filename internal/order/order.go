@@ -1,14 +1,12 @@
 package order
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/logins"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/sales"
@@ -48,10 +46,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		ord := sales.Order{ReceiptNum: receipt}
 		fmt.Println("bill_num =", ord.ReceiptNum)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		vals, err := ord.GetOrdersInBills(ctx)
+		vals, err := ord.GetOrdersInBills(r.Context())
 		if err != nil {
 			respMap["response"] = "error"
 			respMap["message"] = "error fetching orders in bill"
@@ -81,7 +76,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		ordNum, _ := strconv.ParseInt(orderNum, 10, 64)
 
 		ord := sales.Order{OrderNum: ordNum}
-		err := ord.Fetchtems()
+		err := ord.Fetchtems(r.Context())
 		if err != nil {
 			respMap["response"] = "error"
 			respMap["message"] = "failed to fetch cart items"
@@ -166,11 +161,43 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		}
 
 		// add item to cart
-		cart, total, err := ord.AddToOrder(ord.OrderItems[0])
+		cart, total, err := ord.AddToOrder(r.Context(), ord.OrderItems[0])
 		if err != nil {
 			respMap["response"] = "error"
 			respMap["message"] = "failed to add order to cart"
 			respMap["trace"] = err
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["cart"] = cart
+		respMap["total"] = total
+		return respMap
+
+	case "update-qty":
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+			return respMap
+		}
+
+		var req struct {
+			ReceiptItem string  `json:"receipt_item"`
+			OrderNum    string  `json:"order_num"`
+			Quantity    float64 `json:"quantity"`
+		}
+		if err = json.Unmarshal(b, &req); err != nil || req.ReceiptItem == "" || req.OrderNum == "" {
+			respMap["response"] = "error"
+			respMap["message"] = "receipt_item, order_num and quantity are required"
+			return respMap
+		}
+
+		cart, total, err := sales.UpdateOrderItemQty(r.Context(), req.ReceiptItem, req.OrderNum, req.Quantity)
+		if err != nil {
+			log.Println("update-qty error:", err)
+			respMap["response"] = "error"
+			respMap["message"] = "failed to update quantity"
 			return respMap
 		}
 
@@ -205,14 +232,16 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
-		cart, err := ord.CompleteOrder()
+		cart, err := ord.CompleteOrder(r.Context())
 		if err != nil {
+			log.Println("completeOrder failure     err =", err)
 			respMap["response"] = "error"
 			respMap["message"] = "failed to complete order"
 			respMap["trace"] = err
 			return respMap
 		}
 
+		fmt.Println("\t order complete successful")
 		respMap["response"] = "success"
 		respMap["cart"] = cart
 		return respMap
@@ -257,7 +286,7 @@ func Delete(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		fmt.Printf("\t receipt_item = %v \t order_num = %v", itm.AutoID, itm.OrderNum)
 
-		cart, total, err := sales.DelOrderItem(itm.AutoID, itm.OrderNum)
+		cart, total, err := sales.DelOrderItem(r.Context(), itm.AutoID, itm.OrderNum)
 		if err != nil {
 			respMap["response"] = "error"
 			respMap["message"] = "failed to delete order item"

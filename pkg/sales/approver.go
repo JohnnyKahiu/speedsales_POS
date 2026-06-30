@@ -46,5 +46,9 @@ func (arg *Approver) Validate(ctx context.Context) error {
 		return errors.New("expired")
 	}
 
+	if arg.Token != authDetails.Token {
+		return errors.New("invalid")
+	}
+
 	return nil
 }
