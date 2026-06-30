@@ -36,6 +36,8 @@ type PosSettings struct {
 	AuthValidity       int     `json:"auth_validity"`
 	MpesaExpiry        int     `json:"mpesa_expiry"`
 	ManualAddMpesa     bool    `json:"manual_add_mpesa"`
+	MpesaAccount       string  `json:"mpesa_account"`
+	EnableLoyalty      bool    `json:"enable_loyalty"`
 }
 
 // DocHead holds company's information for printed documents

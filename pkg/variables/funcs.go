@@ -34,6 +34,17 @@ func SysDefaults() (SysSettings, error) {
 	return settings, nil
 }
 
+// UpdatePosSettings persists the PosSettings fields to the settings table.
+func UpdatePosSettings(s PosSettings) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = database.PgPool.Exec(context.Background(),
+		`UPDATE settings SET pos_defaults = $1`, string(b))
+	return err
+}
+
 // FetchDefaults
 func FetchDefaults() (SysSettings, error) {
 	var settings SysSettings
