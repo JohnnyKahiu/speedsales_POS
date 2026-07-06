@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/JohnnyKahiu/speedsales/poserver/internal/settings"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/variables"
 )
 
@@ -33,4 +34,29 @@ func ConfigsGet(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(jstr)
+}
+
+func ConfigsPOST(w http.ResponseWriter, r *http.Request) {
+	respMap := settings.POST(w, r)
+
+	jStr, err := json.Marshal(respMap)
+	if err != nil {
+		log.Println("failed to marshal cashSalesPost()  err =", err)
+	}
+
+	EnableCors(&w)
+
+	// write status code headers
+	if respMap["response"] == "forbidden" {
+		w.WriteHeader(http.StatusForbidden)
+	}
+	if respMap["response"] == "error" {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	if respMap["response"] == "success" {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// return response text
+	w.Write(jStr)
 }

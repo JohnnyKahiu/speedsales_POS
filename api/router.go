@@ -31,12 +31,15 @@ func NewRouter() *mux.Router {
 	api.Use(JwtMiddleware)
 
 	api.HandleFunc("/configs", ConfigsGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/configs/{module}", ConfigsPOST).Methods("POST", "OPTIONS")
+
 	api.HandleFunc("/sales/cash/{module}", CashSalesGet).Methods("GET", "OPTIONS")
 	api.HandleFunc("/sales/order/{module}", OrderSalesGet).Methods("GET", "OPTIONS")
 
 	api.HandleFunc("/sales/cash/{module}", CashSalesPost).Methods("POST", "OPTIONS")
 	api.HandleFunc("/sales/order/{module}", OrderSalesPost).Methods("POST", "OPTIONS")
 
+	api.HandleFunc("/sales/cash/{module}", CashSalesDelete).Methods("DELETE", "OPTIONS")
 	api.HandleFunc("/sales/order/{module}", OrderSalesDel).Methods("DELETE", "OPTIONS")
 
 	api.HandleFunc("/sales/payment/{module}", PaymentGet).Methods("GET", "OPTIONS")
@@ -44,6 +47,8 @@ func NewRouter() *mux.Router {
 
 	api.HandleFunc("/sales/laybye/{module}", LaybyeSalesGet).Methods("GET", "OPTIONS")
 	api.HandleFunc("/sales/laybye/{module}", LaybyeSalesPost).Methods("POST", "OPTIONS")
+
+	api.HandleFunc("/reports/till", TillReportGet).Methods("GET", "OPTIONS")
 
 	return r
 }

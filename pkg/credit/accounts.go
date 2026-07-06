@@ -18,6 +18,7 @@ type AcTrans struct {
 	TransType         string  `json:"trans_type" type:"field" sql:"VARCHAR NOT NULL"`
 	TransReff         int64   `json:"trans_reff" type:"field" sql:"BIGINT"`
 	Amount            float64 `json:"amount" type:"field" sql:"FLOAT NOT NULL DEFAULT '0.0'"`
+	CashPaid          float64 `json:"cash_paid" type:"field" sql:"FLOAT NOT NULL DEFAULT '0.0'"`
 	Paid              float64 `json:"paid" type:"field" sql:"FLOAT NOT NULL DEFAULT '0.0'"`
 	PayDetails        Payment `json:"pay_details" type:"field" sql:"JSONB NOT NULL DEFAULT '{\"cash\":0,\"mpesa\":0,\"ecard\":0,\"check\":0}' "`
 	ServedBy          string  `json:"served_by" type:"field" sql:"VARCHAR NOT NULL"`

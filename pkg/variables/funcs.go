@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/JohnnyKahiu/speedsales/poserver/database"
 	"github.com/go-redis/redis"
@@ -40,18 +42,79 @@ func UpdatePosSettings(s PosSettings) error {
 	if err != nil {
 		return err
 	}
-	_, err = database.PgPool.Exec(context.Background(),
-		`UPDATE settings SET pos_defaults = $1`, string(b))
-	return err
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if _, err := database.PgPool.Exec(ctx, `UPDATE settings SET pos_defaults = $1`, string(b)); err != nil {
+		log.Println("postgresql error.  failed to update settings     err =", err)
+		return err
+	}
+	return nil
+}
+
+// UpdateDocFooter persists the DocFooter fields to the settings table.
+func UpdateDocFooter(s DocFooter) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if _, err := database.PgPool.Exec(ctx, `UPDATE settings SET doc_footer = $1`, string(b)); err != nil {
+		log.Println("postgresql error.  failed to update settings     err =", err)
+		return err
+	}
+	return nil
+}
+
+// UpdateDocHeader persists the DocFooter fields to the settings table.
+func UpdateDocHeader(s DocHead) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if _, err := database.PgPool.Exec(ctx, `UPDATE settings SET doc_heading = $1`, string(b)); err != nil {
+		log.Println("postgresql error.  failed to update settings     err =", err)
+		return err
+	}
+	return nil
+}
+
+// UpdateVatCodes persists the vat codes map to the settings table.
+func UpdateVatCodes(codes map[string]float32) error {
+	b, err := json.Marshal(codes)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if _, err := database.PgPool.Exec(ctx, `UPDATE settings SET vat_codes = $1`, string(b)); err != nil {
+		log.Println("postgresql error.  failed to update vat_codes     err =", err)
+		return err
+	}
+	return nil
 }
 
 // FetchDefaults
 func FetchDefaults() (SysSettings, error) {
 	var settings SysSettings
 	sql := `SELECT 
-				pos_defaults, doc_heading, vat_codes::text 
+				pos_defaults, doc_heading, vat_codes::text, doc_footer
 			FROM settings`
-	rows, err := database.PgPool.Query(context.Background(), sql)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	rows, err := database.PgPool.Query(ctx, sql)
 	if err != nil {
 		fmt.Println("error querying system settings    err =", err)
 		return settings, err
@@ -59,7 +122,7 @@ func FetchDefaults() (SysSettings, error) {
 
 	for rows.Next() {
 		vats := ""
-		rows.Scan(&settings.PosDefaults, &settings.DocHead, &vats)
+		rows.Scan(&settings.PosDefaults, &settings.DocHead, &vats, &settings.DocFooter)
 
 		err := json.Unmarshal([]byte(vats), &settings.VatCodes)
 		if err != nil {

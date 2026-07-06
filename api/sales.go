@@ -57,3 +57,26 @@ func CashSalesPost(w http.ResponseWriter, r *http.Request) {
 	// return response text
 	w.Write(jStr)
 }
+
+func CashSalesDelete(w http.ResponseWriter, r *http.Request) {
+	respMap := cash.Delete(w, r)
+
+	jStr, err := json.Marshal(respMap)
+	if err != nil {
+		log.Println("failed to marshal CashSalesDelete()  err =", err)
+	}
+
+	EnableCors(&w)
+
+	if respMap["response"] == "forbidden" {
+		w.WriteHeader(http.StatusForbidden)
+	}
+	if respMap["response"] == "error" {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	if respMap["response"] == "success" {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	w.Write(jStr)
+}

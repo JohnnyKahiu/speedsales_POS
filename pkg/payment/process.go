@@ -38,7 +38,7 @@ func (arg *Payment) processAllPayments(ctx context.Context, tx pgx.Tx) error {
 // claim all mpesa payments
 func (arg *Payment) ClaimMpesa(ctx context.Context, tx pgx.Tx) error {
 	var total float64
-	sql := `UPDATE mobile_money SET trace_num = $1, claimed = True, notation = 'cash sale' WHERE code = $2 RETURNING amount`
+	sql := `UPDATE mobile_money SET trace_num = $1, claimed = True WHERE code = $2 RETURNING amount`
 	for _, detail := range arg.MpesaDetails {
 		var amount float64
 		if err := tx.QueryRow(ctx, sql, arg.Receipt, detail.MpesaCode).Scan(&amount); err != nil {

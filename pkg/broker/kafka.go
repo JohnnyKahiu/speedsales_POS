@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -17,12 +18,20 @@ type Kafka struct {
 	Payload    []byte
 }
 
+type mpesaMessage struct {
+	ID                 string    `json:"id"`
+	MpesaReceiptNumber string    `json:"mpesa_receipt_number"`
+	Phone              string    `json:"phone"`
+	Amount             float64   `json:"amount"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
 // NewConn makes a new connection to kafka broker
 // returns an error if it fails
 func (b *Kafka) NewConn(ctx context.Context) error {
 	conn, err := kafka.DialLeader(ctx, "tcp", b.Broker, b.Topic, 0)
 	if err != nil {
-		log.Fatalf("failed to connect: %v", err)
+		log.Printf("failed to connect: %v", err)
 		return err
 	}
 	defer conn.Close()

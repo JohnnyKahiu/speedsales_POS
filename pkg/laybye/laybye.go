@@ -16,7 +16,7 @@ type DBPool interface {
 
 type Laybye struct {
 	table     string    `name:"laybyes" type:"table"`
-	LaybyeID  int64     `json:"laybye_id"  type:"field" sql:"BIGSERIAL PRIMARY KEY"`
+	LaybyeID  int64     `json:"laybye_id"  type:"field" sql:"BIGSERIAL NOT NULL"`
 	IDNumber  string    `json:"id_number"  type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
 	Telephone string    `json:"telephone"  type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
 	Name      string    `json:"name"       type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
@@ -25,6 +25,7 @@ type Laybye struct {
 	State     string    `json:"state"      type:"field" sql:"VARCHAR NOT NULL DEFAULT 'initiated'"`
 	Poster    string    `json:"poster"     type:"field" sql:"VARCHAR NOT NULL DEFAULT ''"`
 	CreatedAt time.Time `json:"created_at" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	pKey      string    `type:"constraint" name:"laybye_pk" sql:"PRIMARY KEY (laybye_id)"`
 }
 
 func GenTable() error {

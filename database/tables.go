@@ -39,6 +39,9 @@ func CreateFromStruct(tblStruct any) error {
 
 	sqlHead = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v ( ", tblName)
 	sql := sqlHead + sqlBody + ");"
+	if tblName == "mobile_money" {
+		fmt.Println(sql)
+	}
 
 	// run sql transaction
 	_, err := PgPool.Exec(context.Background(), sql)

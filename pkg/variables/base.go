@@ -50,10 +50,19 @@ type DocHead struct {
 	Location    string `json:"location"`
 }
 
+// DocFooter holds footer lines printed at the bottom of receipts/documents
+type DocFooter struct {
+	MpesaInstruction string `json:"mpesa_instruction"`
+	Line1            string `json:"line1"`
+	Line2            string `json:"line2"`
+	Line3            string `json:"line3"`
+}
+
 // SysSettings  structure holds system settings
 type SysSettings struct {
 	PosDefaults PosSettings            `json:"pos_defaults"`
 	DocHead     DocHead                `json:"doc_heading"`
+	DocFooter   DocFooter              `json:"doc_footer"`
 	VatCodes    map[string]float32     `json:"vat_codes"`
 	SysSettings map[string]interface{} `json:"sys_settings"`
 }
@@ -62,6 +71,7 @@ type Settings struct {
 	table       string                 `name:"settings" type:"table"`
 	PosDefaults PosSettings            `json:"pos_defaults" type:"field" sql:"JSONB NOT NULL DEFAULT '{}'"`
 	DocHead     DocHead                `json:"doc_heading" type:"field" sql:"JSONB NOT NULL DEFAULT '{}'"`
+	DocFooter   DocFooter              `json:"doc_footer" type:"field" sql:"JSONB NOT NULL DEFAULT '{}'"`
 	VatCodes    map[string]float32     `json:"vat_codes" type:"field" sql:"JSONB NOT NULL DEFAULT '{}'"`
 	SysSettings map[string]interface{} `json:"sys_settings" type:"field" sql:"JSONB NOT NULL DEFAULT '{}'"`
 }

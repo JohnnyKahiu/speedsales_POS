@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -13,8 +14,10 @@ import (
 
 	"github.com/JohnnyKahiu/speedsales/poserver/api"
 	"github.com/JohnnyKahiu/speedsales/poserver/database"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/broker"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/credit"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/laybye"
+	"github.com/JohnnyKahiu/speedsales/poserver/pkg/payment"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/sales"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/variables"
 	"github.com/joho/godotenv"
@@ -84,12 +87,20 @@ func initTbls() {
 		log.Println("error creating sales tables    err =", err)
 	}
 
+	if err := payment.GenMpesaTbl(); err != nil {
+		log.Println("error creating mobile_money table    err =", err)
+	}
+
 	if err := credit.GenAccountsTxnTable(); err != nil {
 		log.Println("error creating accounts txn table    err =", err)
 	}
 
 	if err := laybye.GenTable(); err != nil {
 		log.Println("error creating laybyes table    err =", err)
+	}
+
+	if err := laybye.GenItemsTable(); err != nil {
+		log.Println("error creating laybye_items table    err =", err)
 	}
 
 	if err := variables.GenSettingsTbl(); err != nil {
@@ -102,6 +113,9 @@ func initTbls() {
 }
 
 func main() {
+	log.SetOutput(os.Stderr)
+	log.SetFlags(log.Ldate | log.Ltime | log.Llongfile)
+
 	var err error
 	// fetch file path from argument
 
@@ -136,7 +150,7 @@ func main() {
 	// make a postgresql database connection
 	database.PgPool, err = conf.NewPgPool()
 	if err != nil {
-		log.Fatalln("\t failed to connect Postgres Pool.    err =", err)
+		log.Println("\t failed to connect Postgres Pool.    err =", err)
 	}
 	defer database.PgPool.Close()
 
@@ -144,8 +158,23 @@ func main() {
 		initTbls()
 	}
 
-	// get configuration files
+	topic := os.Getenv("KAFKA_MPESA_TOPIC")
+	if topic == "" {
+		topic = "Mpesa"
+	}
 
+	kf := broker.Kafka{
+		Broker:  os.Getenv("KAFKA_BROKER"),
+		Topic:   topic,
+		GroupID: "mpesa-api-group",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go payment.ConsumeMpesa(ctx, kf.Broker, kf.Topic, kf.GroupID)
+
+	// get configuration files
 	address := getRunningIPAddress()
 	if os.Getenv("listen_on") != "card" {
 		address = "0.0.0.0"

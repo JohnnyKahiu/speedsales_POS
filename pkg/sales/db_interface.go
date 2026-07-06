@@ -15,29 +15,29 @@ import "log"
 func GenTables() error {
 	err := genTillTbl()
 	if err != nil {
-		log.Fatalln("failed to generate till table err =", err)
+		log.Println("failed to generate till table err =", err)
 	}
 	err = genSalesTbl()
 	if err != nil {
-		log.Fatalln("failed to generate sales table err =", err)
+		log.Println("failed to generate sales table err =", err)
 	}
 	err = genReceiptTbl()
 	if err != nil {
-		log.Fatalln("failed to generate receipts table err =", err)
+		log.Println("failed to generate receipts table err =", err)
 	}
 	err = genOrderTable()
 	if err != nil {
-		log.Fatalln("failed to generate order table err =", err)
+		log.Println("failed to generate order table err =", err)
 	}
 
 	err = genCashTable()
 	if err != nil {
-		log.Fatalln("failed to generate cash table err =", err)
+		log.Println("failed to generate cash table err =", err)
 	}
 
 	err = genPaymentsTable()
 	if err != nil {
-		log.Fatalln("failed to generate till_payments table err =", err)
+		log.Println("failed to generate till_payments table err =", err)
 	}
 
 	return err

@@ -882,3 +882,12 @@ func (arg *ReceiptLog) GetPayingRcpts(ctxt context.Context) ([]ReceiptLog, error
 	// fmt.Println("vals =", vals)
 	return vals, nil
 }
+
+// FetchCustName fetches cust_name from salestrace for the receipt and populates arg.CustName.
+func (arg *ReceiptLog) FetchCustName(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	sql := `SELECT coalesce(cust_name, 'walk in') FROM salestrace WHERE receipt_num = $1`
+	return database.PgPool.QueryRow(ctx, sql, arg.ReceiptNum).Scan(&arg.CustName)
+}

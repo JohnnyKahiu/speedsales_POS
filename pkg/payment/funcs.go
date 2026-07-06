@@ -97,18 +97,19 @@ type GVoucherDetails struct {
 
 // claim receipt paid
 func (arg *Payment) ClaimReceipt(ctx context.Context, tx pgx.Tx) error {
-	sql := `UPDATE salestrace 
-			SET 
+	sql := `UPDATE salestrace
+			SET
 				total = $2
 				, cash = $3
 				, change = $4
 				, state = $5
 				, cart = $6
-				, pay_details = $7 
+				, pay_details = $7
 				, last_updated = now()
 				, pay_till = $8
 				, analysis = $9
-				--, loyalty = $10
+				, etr = $10
+				--, loyalty = $11
 			WHERE receipt_num = $1`
 
 	fmt.Println("=============== cash tendered ==============================")
@@ -137,10 +138,11 @@ func (arg *Payment) ClaimReceipt(ctx context.Context, tx pgx.Tx) error {
 	cartItems, _ := arg.SalesCart(ctx)
 	cart, _ := json.Marshal(cartItems)
 	analysis, _ := json.Marshal(arg.Analysis)
+	etr, _ := json.Marshal(arg.Etr)
 
 	fmt.Printf("till_num = %s \n\n", arg.TillNum)
 	_, err := tx.Exec(ctx, sql, arg.Receipt, arg.Total, arg.CashTendered, arg.Change,
-		"POSTED", string(cart), string(pays), arg.TillNum, string(analysis) /*, loyals*/)
+		"POSTED", string(cart), string(pays), arg.TillNum, string(analysis), string(etr) /*, loyals*/)
 	if err != nil {
 		log.Println("\n\t Error updating salestrace \t", err)
 		return err

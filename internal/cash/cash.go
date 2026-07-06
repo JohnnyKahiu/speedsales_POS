@@ -62,7 +62,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		} else {
 			a.ReceiptNum, _ = strconv.ParseInt(rcpt, 10, 64)
 		}
-		// log.Fatalln("receipt num =", a.ReceiptNum)
+		// log.Println("receipt num =", a.ReceiptNum)
 
 		err = a.Fetch(r.Context())
 		if err != nil {
@@ -463,7 +463,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		cart, err := item.AddCart(r.Context())
 		if err != nil {
-			log.Fatalln("error. failed to add item to cart     err =", err)
+			log.Println("error. failed to add item to cart     err =", err)
 			respMap["response"] = "error"
 			respMap["message"] = "failed adding to cart"
 			respMap["trace"] = err
@@ -573,6 +573,9 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 			return respMap
 		}
+
+		// populate cust_name from salestrace for the print receipt
+		_ = receipt.FetchCustName(r.Context())
 
 		respMap["response"] = "success"
 		respMap["sales"] = receipt

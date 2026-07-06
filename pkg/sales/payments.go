@@ -11,7 +11,7 @@ import (
 // TillPayment records every payment transaction processed at a till.
 type TillPayment struct {
 	table      string    `name:"till_payments" type:"table"`
-	TxnID      int64     `json:"txn_id"      name:"txn_id"      type:"field" sql:"BIGSERIAL PRIMARY KEY"`
+	TxnID      int64     `json:"txn_id"      name:"txn_id"      type:"field" sql:"BIGSERIAL"`
 	TransTime  time.Time `json:"trans_time"  name:"trans_time"  type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
 	PaymentFor string    `json:"payment_for" name:"payment_for" type:"field" sql:"VARCHAR(30) NOT NULL DEFAULT 'cash_sale'"` // cash_sale | laybye_payment | credit_pay
 	TillNum    int64     `json:"till_num"    name:"till_num"    type:"field" sql:"BIGINT NOT NULL DEFAULT 0"`
@@ -24,7 +24,7 @@ type TillPayment struct {
 	Cheque     float64   `json:"cheque"      name:"cheque"      type:"field" sql:"DECIMAL NOT NULL DEFAULT 0"`
 	CashInTill float64   `json:"cash_in_till" name:"cash_in_till" type:"field" sql:"DECIMAL NOT NULL DEFAULT 0"`
 	CashOut    float64   `json:"cash_out"    name:"cash_out"    type:"field" sql:"DECIMAL NOT NULL DEFAULT 0"`
-	pkey       string    `name:"pkey_till_pay" type:"constraint" sql:"PRIMARY KEY(txn_id)`
+	pkey       string    `name:"pkey_till_pay" type:"constraint" sql:"PRIMARY KEY(txn_id)"`
 }
 
 func genPaymentsTable() error {
