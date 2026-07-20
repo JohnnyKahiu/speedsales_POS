@@ -63,7 +63,7 @@ func POST(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		if err != nil {
 			log.Println("commit Pay error     err =", err)
 			respMap["response"] = "error"
-			respMap["message"] = "failed to commit payment"
+			respMap["message"] = err
 			respMap["trace"] = err
 			return respMap
 		}
@@ -160,6 +160,53 @@ func POST(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["transaction_id"] = resp.TransactionID
 		respMap["checkout_request_id"] = resp.CheckoutRequestID
 		respMap["customer_message"] = resp.CustomerMessage
+		return respMap
+
+	case "manual-mpesa":
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+			return respMap
+		}
+
+		var req struct {
+			Code      string  `json:"code"`
+			Amount    float64 `json:"amount"`
+			Telephone string  `json:"telephone"`
+		}
+		if err = json.Unmarshal(b, &req); err != nil || req.Amount <= 0 {
+			respMap["response"] = "error"
+			respMap["message"] = "amount is required"
+			return respMap
+		}
+
+		mm := payment.MobileMoney{
+			Code:      req.Code,
+			Telephone: req.Telephone,
+			Amount:    req.Amount,
+		}
+		// mobile_money.code is UNIQUE — a blank/repeated cashier-typed code
+		// (the frontend doesn't require one) would collide, so mint a unique
+		// placeholder the same way AddPending does when the real code isn't
+		// known yet.
+		if mm.Code == "" {
+			mm.Code = uuid.New().String()
+		}
+
+		if err := mm.AddManual(r.Context(), database.PgPool); err != nil {
+			respMap["response"] = "error"
+			if strings.Contains(err.Error(), "duplicate key") {
+				respMap["message"] = "that mpesa code has already been recorded"
+			} else {
+				respMap["message"] = "failed to record manual mpesa entry"
+			}
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["pos_id"] = mm.ID.String()
+		respMap["code"] = mm.Code
 		return respMap
 	}
 

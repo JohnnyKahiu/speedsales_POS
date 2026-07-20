@@ -13,14 +13,16 @@ func (arg *Payment) processAllPayments(ctx context.Context, tx pgx.Tx) error {
 	// Claim Mpesa
 	if len(arg.MpesaDetails) > 0 {
 		if err := arg.ClaimMpesa(ctx, tx); err != nil {
-			return fmt.Errorf("mpesa claim failed: %w", err)
+			log.Printf("mpesa claim failed: %v", err)
+			return fmt.Errorf("mpesa claim failed")
 		}
 	}
 
 	// Claim E-Cards
 	if len(arg.EcardDetails) > 0 {
 		if err := arg.ClaimEcards(ctx, tx); err != nil {
-			return fmt.Errorf("ecard claim failed: %w", err)
+			log.Printf("ecard claim failed: %w", err)
+			return fmt.Errorf("ecard claim failed")
 		}
 	}
 
@@ -28,7 +30,8 @@ func (arg *Payment) processAllPayments(ctx context.Context, tx pgx.Tx) error {
 	if len(arg.GVoucherDetails) > 0 {
 		total, err := arg.ClaimGiftVoucher(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("voucher claim failed: %w", err)
+			log.Printf("voucher claim failed: %w", err)
+			return fmt.Errorf("voucher claim failed")
 		}
 		arg.VoucherTotal = total
 	}

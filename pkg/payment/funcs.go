@@ -230,8 +230,8 @@ func (arg *Payment) FetchReceipt(ctx context.Context, tx pgx.Tx) error {
 
 	rows, err := tx.Query(ctx, sql, arg.Receipt)
 	if err != nil {
-		log.Println("error. failed to query receipt    err =", err)
-		return err
+		log.Println("postgres error. failed to query receipt    err =", err)
+		return fmt.Errorf("failed fetching receipt")
 	}
 	defer rows.Close()
 
@@ -245,7 +245,7 @@ func (arg *Payment) FetchReceipt(ctx context.Context, tx pgx.Tx) error {
 			&arg.TransDate, &arg.Receipt, &loyaltyDets)
 		if err != nil {
 			log.Println("sql scan error.     err =", err)
-			return err
+			return fmt.Errorf("failed fetching receipt")
 		}
 
 		if r.State == "pending" {
@@ -256,7 +256,7 @@ func (arg *Payment) FetchReceipt(ctx context.Context, tx pgx.Tx) error {
 			err = json.Unmarshal([]byte(loyaltyDets), &arg.Loyalty)
 			if err != nil {
 				log.Println("json unmarshalling error    err =", err)
-				return err
+				return fmt.Errorf("failed fetching receipt")
 			}
 		}
 
@@ -273,6 +273,7 @@ func (arg *Payment) FetchReceipt(ctx context.Context, tx pgx.Tx) error {
 
 	err = arg.GetTaxBreak(ctx)
 	if err != nil {
+		log.Println("error. getting tax breakdown.    err = %w", err)
 		return fmt.Errorf("failed while getting tax breakdown")
 	}
 

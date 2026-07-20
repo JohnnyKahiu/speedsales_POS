@@ -11,6 +11,7 @@ import (
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/logins"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/products"
 	"github.com/JohnnyKahiu/speedsales/poserver/pkg/variables"
+	"github.com/jackc/pgx/v5"
 )
 
 type Sales struct {
@@ -90,19 +91,34 @@ func (arg *Sales) AddCart(ctxt context.Context) ([]Sales, error) {
 
 // recordCart
 func (arg *Sales) recordCart(ctxt context.Context) ([]Sales, error) {
+	ctx, cancel := context.WithTimeout(ctxt, 30*time.Second)
+	defer cancel()
+
+	tx, err := database.PgPool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return []Sales{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	rcpt := ReceiptLog{ReceiptNum: arg.ReceiptNum}
-	if err := rcpt.Fetch(ctxt); err != nil {
+	// FetchTx locks the row (FOR UPDATE) for the rest of this transaction, so
+	// a concurrent add-cart for the same receipt blocks on this lock instead
+	// of reading a stale cart and silently clobbering this append on write.
+	if err := rcpt.FetchTx(ctx, tx); err != nil {
 		return []Sales{}, err
 	}
 
-	// cart := rcpt.Cart
 	rcpt.Cart = append(rcpt.Cart, *arg)
 	for _, n := range rcpt.Cart {
 		fmt.Printf("row = %s\n", n)
 	}
 	fmt.Println("\n")
 
-	if err := rcpt.AddCart(ctxt); err != nil {
+	if err := rcpt.AddCartTx(ctx, tx); err != nil {
+		return []Sales{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return []Sales{}, err
 	}
 

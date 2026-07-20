@@ -55,9 +55,12 @@ type User struct {
 	Device               string    `json:"device" name:"device" type:"field" sql:"VARCHAR(50)"`
 	Token                string    `json:"token" name:"token" type:"field" sql:"VARCHAR(150)"`
 	TokenDate            time.Time `json:"token_date" name:"token_date" type:"field" sql:"TIMESTAMP"`
-	Reset                bool      `json:"reset" name:"reset" type:"field" sql:"BOOL NOT NULL DEFAULT 'FALSE'"`
-	Passcode             string    `json:"passcode"`
-	SessionIDs           []string  `name:"session_ids" `
+	Reset                   bool     `json:"reset" name:"reset" type:"field" sql:"BOOL NOT NULL DEFAULT 'FALSE'"`
+	Passcode                string   `json:"passcode"`
+	SessionIDs              []string `name:"session_ids"`
+	AccessSalesReports      bool     `json:"access_sales_reports"`
+	GrantAccessSalesReports bool     `json:"grant_access_sales_reports"`
+	ApproveSales            bool     `json:"approve_sales"`
 }
 
 var mySigningKey = os.Getenv("JWT_KEY")

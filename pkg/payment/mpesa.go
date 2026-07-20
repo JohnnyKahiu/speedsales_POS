@@ -108,6 +108,27 @@ func (arg *MobileMoney) AddPending(ctxt context.Context, db DBPool) error {
 	return err
 }
 
+// AddManual persists a cashier-entered mpesa code/amount immediately, before
+// the sale itself is committed — unlike AddPending, the code is already
+// known (no callback will ever arrive to fill it in), so it's stored as-is
+// with status 'manual' rather than the STK push 'pending' default.
+func (arg *MobileMoney) AddManual(ctxt context.Context, db DBPool) error {
+	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
+	defer cancel()
+
+	arg.ID = uuid.New()
+	arg.RequestMode = "manual"
+
+	_, err := db.Exec(ctx,
+		`INSERT INTO mobile_money(id, code, telephone, amount, request_mode, status) VALUES($1, $2, $3, $4, $5, 'manual')`,
+		arg.ID, arg.Code, arg.Telephone, arg.Amount, arg.RequestMode,
+	)
+	if err != nil {
+		log.Println("mobile_money AddManual error     err =", err)
+	}
+	return err
+}
+
 // updateCallback stamps the real mpesa_receipt_number, merchant_time, and status on the pending row.
 func (m *mpesaMessage) updateCallback(ctxt context.Context) error {
 	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)

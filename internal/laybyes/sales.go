@@ -134,6 +134,40 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		respMap["item"] = item
 		return respMap
 
+	case "payment":
+		if !details.AcceptPayment {
+			respMap["response"] = "forbidden"
+			respMap["message"] = "forbidden"
+			return respMap
+		}
+
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "bad request"
+			return respMap
+		}
+
+		pay := laybye.Payment{TillNum: details.TillNum, StkLocation: details.StkLocation}
+		if err := json.Unmarshal(b, &pay); err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = "invalid request body"
+			return respMap
+		}
+		// Only a branch-less/"all" user's own request may pick the branch.
+		pay.Branch = details.ResolveBranch(pay.Branch)
+
+		tp, err := pay.Pay(r.Context())
+		if err != nil {
+			respMap["response"] = "error"
+			respMap["message"] = err.Error()
+			return respMap
+		}
+
+		respMap["response"] = "success"
+		respMap["payment"] = tp
+		return respMap
+
 	default:
 		respMap["response"] = "error"
 		respMap["message"] = "unknown module: " + m

@@ -131,30 +131,55 @@ func (arg *Payment) CommitPay(ctxt context.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	err = arg.FetchReceipt(ctx, tx)
-	if err != nil {
+	if err := arg.FetchReceipt(ctx, tx); err != nil {
 		return err
 	}
 
-	err = arg.processAllPayments(ctx, tx)
-	if err != nil {
+	if err := arg.processAllPayments(ctx, tx); err != nil {
 		return err
 	}
 
-	err = arg.validateCash()
-	if err != nil {
+	if err := arg.validateCash(); err != nil {
 		return err
 	}
 
 	fmt.Printf("\t cash tendered = %v\n", arg.CashTendered)
 	fmt.Printf("\t      tendered = %v\n", arg.Tendered)
-	err = arg.finalizeTransaction(ctx, tx)
-	if err != nil {
+	if err = arg.finalizeTransaction(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := arg.publishPaymentEvent(ctx); err != nil {
 		return err
 	}
 
 	// tx.Rollback(ctx)/
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// publishPaymentEvent records and publishes the cash-sale payment as a payments_in
+// event. Failures are logged, not returned: the sale itself is already committed.
+func (arg *Payment) publishPaymentEvent(ctx context.Context) error {
+	receiptNum, _ := strconv.ParseInt(arg.Receipt, 10, 64)
+	tillNum, _ := strconv.ParseInt(arg.TillNum, 10, 64)
+
+	tp := sales.TillPayment{
+		PaymentFor: "cash_sale",
+		TillNum:    tillNum,
+		SaleID:     receiptNum,
+		Cash:       arg.CashTendered - arg.Change,
+		Mpesa:      arg.MpesaTendered,
+		Ecard:      arg.EcardTendered,
+		Cheque:     arg.CheckTendered,
+	}
+	if err := tp.RecordAndPublish(ctx); err != nil {
+		log.Println("error. failed to record till_payment for cash_sale    err =", err)
+		return err
+	}
+	return nil
 }

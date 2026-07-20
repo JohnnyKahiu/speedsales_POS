@@ -49,11 +49,12 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		rcpt := r.URL.Query().Get("receipt")
 		var err error
+		fmt.Println("\t receipt =", rcpt)
 
 		var a sales.ReceiptLog
 		if rcpt == "" {
 			a.Poster = details.Username
-			a.Branch = details.Branch
+			a.Branch = details.ResolveBranch(r.URL.Query().Get("branch"))
 			a.CompanyID = details.CompanyID
 			a.TillNum = details.TillNum
 			a.SaleType = "Cash Sale"
@@ -62,7 +63,7 @@ func Get(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 		} else {
 			a.ReceiptNum, _ = strconv.ParseInt(rcpt, 10, 64)
 		}
-		// log.Println("receipt num =", a.ReceiptNum)
+		// log.Fatalln("receipt num =", a.ReceiptNum)
 
 		err = a.Fetch(r.Context())
 		if err != nil {
@@ -222,7 +223,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		till := sales.Till{
 			Teller:     details.Username,
-			Branch:     details.Branch,
+			Branch:     details.ResolveBranch(strVal("branch")),
 			Supervisor: strVal("approver"),
 			OpenFloat:  openFloat,
 		}
@@ -251,11 +252,18 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
+		var branchReq struct {
+			Branch string `json:"branch"`
+		}
+		if b, err := io.ReadAll(r.Body); err == nil {
+			json.Unmarshal(b, &branchReq)
+		}
+
 		receipt := sales.ReceiptLog{
 			TillNum:   details.TillNum,
 			Poster:    details.Username,
 			SaleType:  "Cash Sale",
-			Branch:    details.Branch,
+			Branch:    details.ResolveBranch(branchReq.Branch),
 			CompanyID: details.CompanyID,
 			AcNum:     "0",
 		}
@@ -306,7 +314,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		receipt := sales.ReceiptLog{
 			TillNum:   details.TillNum,
-			Branch:    details.Branch,
+			Branch:    details.ResolveBranch(strField("branch")),
 			Poster:    details.Username,
 			SaleType:  "Cash Sale",
 			CompanyID: 0,
@@ -315,6 +323,7 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		err := receipt.GenReceipt(r.Context())
 		if err != nil {
+			log.Println("gen_receipt error     err =", err)
 			respMap["response"] = "error"
 			respMap["message"] = "receipt number is null"
 			respMap["trace"] = err
@@ -447,7 +456,14 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 
 		// fetch receiptNum if not provided
 		if item.ReceiptNum == 0 {
-			rcpt := sales.ReceiptLog{TillNum: details.TillNum, Poster: details.Username}
+			var branchReq struct {
+				Branch string `json:"branch"`
+			}
+			json.Unmarshal(b, &branchReq)
+
+			// Branch was never set here at all — any receipt implicitly
+			// created through this fallback got branch = '' in salestrace.
+			rcpt := sales.ReceiptLog{TillNum: details.TillNum, Poster: details.Username, Branch: details.ResolveBranch(branchReq.Branch)}
 			err = rcpt.GenReceipt(r.Context())
 			if err != nil {
 				log.Println("failed to create receipt")

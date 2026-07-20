@@ -14,6 +14,7 @@ type TillReport struct {
 	Teller          string  `json:"teller"`
 	OpenFloat       float64 `json:"open_float"`
 	CloseCash       float64 `json:"close_cash"`
+	CashRollups     float64 `json:"cash_rollups"`
 	// raw payment method totals from cash sales
 	CashSale        float64 `json:"cash_sale"`
 	MpesaSale       float64 `json:"mpesa_sale"`
@@ -37,15 +38,12 @@ type TillReport struct {
 func FetchTillReport(ctxt context.Context, start, end, cashier string, tillNo int64) ([]TillReport, error) {
 	sql := `
 	WITH
-	cash_sales AS (
+	-- salestrace: totals only (voucher and grand total for cash sales)
+	cash_sale_totals AS (
 		SELECT
 			pay_till AS till_num
-			, COALESCE(SUM(CAST(pay_details::json->>'cash'    AS float)), 0) AS cash
-			, COALESCE(SUM(CAST(pay_details::json->>'mpesa'   AS float)), 0) AS mpesa
-			, COALESCE(SUM(CAST(pay_details::json->>'ecard'   AS float)), 0) AS ecard
-			, COALESCE(SUM(CAST(pay_details::json->>'check'   AS float)), 0) AS cheque
 			, COALESCE(SUM(CAST(pay_details::json->>'voucher' AS float)), 0) AS voucher
-			, COALESCE(SUM(total), 0) AS total_cash_sale
+			, COALESCE(SUM(total), 0)                                        AS total_cash_sale
 		FROM salestrace
 		WHERE state IN ('POSTED', 'PAID')
 			AND sale_type = 'Cash Sale'
@@ -70,60 +68,64 @@ func FetchTillReport(ctxt context.Context, start, end, cashier string, tillNo in
 			AND trans_date::date >= $1 AND trans_date::date <= $2
 		GROUP BY pay_till
 	),
-	credit_pays AS (
+	-- till_payments is the single source of truth for all payment method amounts
+	payments AS (
 		SELECT
 			till_num
-			, COALESCE(SUM(CAST(pay_details->'cash'  AS varchar)::float), 0) AS cash
-			, COALESCE(SUM(CAST(pay_details->'mpesa' AS varchar)::float), 0) AS mpesa
-			, COALESCE(SUM(CAST(pay_details->'ecard' AS varchar)::float), 0) AS ecard
-			, COALESCE(SUM(CAST(pay_details->'check' AS varchar)::float), 0) AS cheque
-		FROM accounts_txn
-		WHERE trans_date::date >= $1 AND trans_date::date <= $2
-		GROUP BY till_num
+			, payment_for
+			, COALESCE(SUM(cash),   0) AS cash
+			, COALESCE(SUM(mpesa),  0) AS mpesa
+			, COALESCE(SUM(ecard),  0) AS ecard
+			, COALESCE(SUM(cheque), 0) AS cheque
+		FROM till_payments
+		WHERE trans_time::date >= $1 AND trans_time::date <= $2
+		GROUP BY till_num, payment_for
 	),
-	laybye_pays AS (
+	rollups AS (
 		SELECT
 			till_num
-			, COALESCE(SUM(CASE WHEN pay_type = 'cash'   THEN amount_paid END), 0) AS cash
-			, COALESCE(SUM(CASE WHEN pay_type = 'mpesa'  THEN amount_paid END), 0) AS mpesa
-			, COALESCE(SUM(CASE WHEN pay_type = 'ecard'  THEN amount_paid END), 0) AS ecard
-			, COALESCE(SUM(CASE WHEN pay_type = 'cheque' THEN amount_paid END), 0) AS cheque
-		FROM laybye_trans
-		WHERE trans_type = 'payment'
+			, COALESCE(SUM(amount), 0) AS amount
+		FROM cash_movement
+		WHERE type = 'cash rollup'
+			AND confirm_state = 'CONFIRMED'
 			AND trans_date::date >= $1 AND trans_date::date <= $2
 		GROUP BY till_num
 	)
 	SELECT
 		st.till_no
 		, st.teller
-		, COALESCE(st.open_float, 0)            AS open_float
+		, COALESCE(st.open_float, 0)             AS open_float
 		, COALESCE(st.close_cash, 0)             AS close_cash
-		, COALESCE(cs.cash, 0)                   AS cash_sale
-		, COALESCE(cs.mpesa, 0)                  AS mpesa_sale
-		, COALESCE(cs.ecard, 0)                  AS card_sale
-		, COALESCE(cs.cheque, 0)                 AS cheque_sale
-		, COALESCE(cs.voucher, 0)                AS voucher_sale
-		, COALESCE(cs.total_cash_sale, 0)        AS total_cash_sale
+		, COALESCE(rl.amount, 0)                 AS cash_rollups
+		, COALESCE(cs_pay.cash,   0)             AS cash_sale
+		, COALESCE(cs_pay.mpesa,  0)             AS mpesa_sale
+		, COALESCE(cs_pay.ecard,  0)             AS card_sale
+		, COALESCE(cs_pay.cheque, 0)             AS cheque_sale
+		, COALESCE(cst.voucher, 0)               AS voucher_sale
+		, COALESCE(cst.total_cash_sale, 0)       AS total_cash_sale
 		, COALESCE(ret.amount, 0)                AS sales_return
 		, COALESCE(crs.total, 0)                 AS total_credit_sale
-		, COALESCE(cp.cash, 0)                   AS credit_cash
-		, COALESCE(cp.mpesa, 0)                  AS credit_mpesa
-		, COALESCE(cp.ecard, 0)                  AS credit_ecard
-		, COALESCE(cp.cheque, 0)                 AS credit_cheque
-		, COALESCE(lp.cash, 0)                   AS laybye_cash
-		, COALESCE(lp.mpesa, 0)                  AS laybye_mpesa
-		, COALESCE(lp.ecard, 0)                  AS laybye_ecard
-		, COALESCE(lp.cheque, 0)                 AS laybye_cheque
+		, COALESCE(cp_pay.cash,   0)             AS credit_cash
+		, COALESCE(cp_pay.mpesa,  0)             AS credit_mpesa
+		, COALESCE(cp_pay.ecard,  0)             AS credit_ecard
+		, COALESCE(cp_pay.cheque, 0)             AS credit_cheque
+		, COALESCE(lp_pay.cash,   0)             AS laybye_cash
+		, COALESCE(lp_pay.mpesa,  0)             AS laybye_mpesa
+		, COALESCE(lp_pay.ecard,  0)             AS laybye_ecard
+		, COALESCE(lp_pay.cheque, 0)             AS laybye_cheque
 	FROM sales_till st
-		LEFT JOIN cash_sales    cs  ON cs.till_num  = st.till_no
-		LEFT JOIN returns       ret ON ret.till_num = st.till_no
-		LEFT JOIN credit_sales  crs ON crs.till_num = st.till_no
-		LEFT JOIN credit_pays   cp  ON cp.till_num  = st.till_no
-		LEFT JOIN laybye_pays   lp  ON lp.till_num  = st.till_no
+		LEFT JOIN cash_sale_totals  cst    ON cst.till_num   = st.till_no
+		LEFT JOIN returns           ret    ON ret.till_num   = st.till_no
+		LEFT JOIN credit_sales      crs    ON crs.till_num   = st.till_no
+		LEFT JOIN payments          cs_pay ON cs_pay.till_num = st.till_no AND cs_pay.payment_for = 'cash_sale'
+		LEFT JOIN payments          cp_pay ON cp_pay.till_num = st.till_no AND cp_pay.payment_for = 'credit_pay'
+		LEFT JOIN payments          lp_pay ON lp_pay.till_num = st.till_no AND lp_pay.payment_for = 'laybye_payment'
+		LEFT JOIN rollups           rl     ON rl.till_num    = st.till_no
 	WHERE
 		($3 = '' OR st.teller   = $3)
 		AND ($4 = 0 OR st.till_no = $4)
 		AND st.open_time::date >= $1
+		AND st.open_time::date <= $2
 	ORDER BY st.open_time ASC`
 
 	ctx, cancel := context.WithTimeout(ctxt, 30*time.Second)
@@ -143,7 +145,7 @@ func FetchTillReport(ctxt context.Context, start, end, cashier string, tillNo in
 		var laybyCash, laybyMpesa, laybyEcard, laybyCheque float64
 
 		if err := rows.Scan(
-			&r.TillNo, &r.Teller, &r.OpenFloat, &r.CloseCash,
+			&r.TillNo, &r.Teller, &r.OpenFloat, &r.CloseCash, &r.CashRollups,
 			&r.CashSale, &r.MpesaSale, &r.CardSale, &r.ChequeSale, &r.VoucherSale,
 			&r.TotalCashSale, &r.SalesReturn, &r.TotalCreditSale,
 			&creditCash, &creditMpesa, &creditEcard, &creditCheque,
@@ -159,8 +161,11 @@ func FetchTillReport(ctxt context.Context, start, end, cashier string, tillNo in
 		r.CardIn   = r.CardSale   + creditEcard  + laybyEcard
 		r.ChequeIn = r.ChequeSale + creditCheque + laybyCheque
 
-		r.CashSummary = r.CashIn + r.MpesaIn + r.CardIn + r.ChequeIn + r.VoucherSale - r.SalesReturn
-		r.Balance = (r.OpenFloat - r.CloseCash) - r.CashIn
+		// cash_summary = cash_in + mpesa_in + ecard_in - sales_returns
+		r.CashSummary = r.CashIn + r.MpesaIn + r.CardIn - r.SalesReturn
+
+		// cash_bal = close_cash - (cash_in + open_float - rollups)
+		r.Balance = r.CloseCash - (r.CashIn + r.OpenFloat - r.CashRollups)
 
 		results = append(results, r)
 	}

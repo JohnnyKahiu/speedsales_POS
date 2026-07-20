@@ -10,8 +10,8 @@ import (
 
 type AcTrans struct {
 	table             string  `name:"accounts_txn" type:"table"`
-	AutoID            string  `json:"auto_id" type:"field" sql:"BIGSERIAL NOT NULL"`
-	TransDate         string  `json:"trans_date" type:"field" sql:"TIMESTAMP NOT NULL DEFAULT now()"`
+	AutoID            int64   `json:"auto_id" type:"field" sql:"BIGSERIAL NOT NULL"`
+	TransDate         string  `json:"trans_date" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
 	AcNum             string  `json:"ac_num" type:"field" sql:"VARCHAR NOT NULL"`
 	TillNum           int64   `json:"till_num" type:"field" sql:"BIGINT NOT NULL DEFAULT '0'"`
 	Name              string  `json:"name" type:"field" sql:"VARCHAR"`
@@ -25,7 +25,8 @@ type AcTrans struct {
 	ApprovedBy        string  `json:"approved_by" type:"field" sql:"VARCHAR"`
 	ConfirmedBy       string  `json:"confirmed_by" type:"field" sql:"VARCHAR"`
 	ReceivedBy        string  `json:"received_by" type:"field" sql:"VARCHAR"`
-	TransCompleteTime string  `json:"trans_complete_time" type:"field" sql:"TIMESTAMP NOT NULL DEFAULT now()"`
+	TransCompleteTime string  `json:"trans_complete_time" type:"field" sql:"TIMESTAMPTZ NOT NULL DEFAULT now()"`
+	State             string  `json:"state" type:"field" sql:"VARCHAR(20) NOT NULL DEFAULT 'POSTED'"`
 	ScCustomer        string  `json:"sc_customer"`
 	Balance           float64 `json:"balance"`
 	Branch            string  `json:"branch"`
@@ -44,9 +45,10 @@ func (a *AcTrans) AddAccountTxn(ctxt context.Context) error {
 	defer cancel()
 
 	sql := `INSERT INTO accounts_txn(trans_date, ac_num, till_num, name, trans_type, trans_reff, amount, paid, pay_details, served_by, approved_by, confirmed_by, received_by, trans_complete_time)
-			VALUES(now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) `
+			VALUES(now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			RETURNING auto_id`
 
-	_, err := database.PgPool.Exec(ctx, sql, a.AcNum, a.TillNum, a.Name, a.TransType, a.TransReff, a.Amount, a.Paid, a.PayDetails, a.ServedBy, a.ApprovedBy, a.ConfirmedBy, a.ReceivedBy, a.TransCompleteTime)
+	err := database.PgPool.QueryRow(ctx, sql, a.AcNum, a.TillNum, a.Name, a.TransType, a.TransReff, a.Amount, a.Paid, a.PayDetails, a.ServedBy, a.ApprovedBy, a.ConfirmedBy, a.ReceivedBy, a.TransCompleteTime).Scan(&a.AutoID)
 	if err != nil {
 		log.Println("postgresql error. failed to add new accounts_txn       err =", err)
 		return err

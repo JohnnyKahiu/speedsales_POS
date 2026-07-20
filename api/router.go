@@ -49,6 +49,8 @@ func NewRouter() *mux.Router {
 	api.HandleFunc("/sales/laybye/{module}", LaybyeSalesPost).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/reports/till", TillReportGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/reports/products", ProductReportGet).Methods("GET", "OPTIONS")
+	api.HandleFunc("/reports/receipts", ReceiptsReportGet).Methods("GET", "OPTIONS")
 
 	return r
 }

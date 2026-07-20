@@ -142,7 +142,11 @@ func (arg *Till) OpenTill(ctx context.Context, db DBPool) error {
 	}
 
 	if arg.Exists(ctx) {
-		fmt.Println("till already exists")
+		fmt.Println("till already exists, till_no =", arg.TillNO)
+		// TillNO is now populated from Exists; still sync it to the Login service.
+		if err := arg.UpdateTill(ctx); err != nil {
+			log.Println("warning: failed to sync existing till to login service    err =", err)
+		}
 		return nil
 	}
 

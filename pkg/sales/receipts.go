@@ -90,6 +90,7 @@ func (arg *ReceiptLog) GenReceipt(ctxt context.Context) error {
 	defer fmt.Printf("GenReceipt took %v", time.Since(start))
 
 	if arg.TillNum == 0 {
+		log.Println("error till_num if null")
 		return fmt.Errorf("op error, till num is null")
 	}
 
@@ -192,6 +193,89 @@ func (arg *ReceiptLog) Fetch(ctx context.Context) error {
 	}
 
 	arg.Cart = Cart
+
+	return nil
+}
+
+// FetchTx is Fetch, but runs inside tx and locks the row with FOR UPDATE so
+// concurrent AddCart calls for the same receipt serialize on the row lock
+// instead of racing: without it, two near-simultaneous adds can both read
+// the same cart snapshot, and whichever writes back last silently discards
+// every item the other one added.
+func (arg *ReceiptLog) FetchTx(ctx context.Context, tx pgx.Tx) error {
+	if arg.ReceiptNum == 0 {
+		return fmt.Errorf("op error, receipt num is null")
+	}
+
+	sql := `SELECT
+				trans_date
+				, receipt_num
+				, till_num
+				, pay_till
+				, branch
+				, poster
+				, coalesce(total, 0)
+				, coalesce(change, 0)
+				, state
+				, approver
+				, coalesce(cart::varchar, '')
+				, pay_details
+				, total
+			FROM salestrace
+			WHERE receipt_num = $1
+			FOR UPDATE`
+
+	rows, err := tx.Query(ctx, sql, arg.ReceiptNum)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	cart := ""
+	payDets := ""
+	arg.ReceiptNum = 0
+	for rows.Next() {
+		err := rows.Scan(&arg.TransDate, &arg.ReceiptNum, &arg.TillNum, &arg.PayTill, &arg.Branch, &arg.Poster,
+			&arg.Total, &arg.Change, &arg.State, &arg.Approver, &cart, &payDets, &arg.Total)
+		if err != nil {
+			return fmt.Errorf("error. failed to scan receipt log items    err = %v", err)
+		}
+	}
+
+	json.Unmarshal([]byte(cart), &arg.Cart)
+	if cart == "" {
+		arg.Cart = nil
+	}
+
+	json.Unmarshal([]byte(payDets), &arg.PayDetails)
+
+	arg.Total = 0
+	Cart := []Sales{}
+	for _, item := range arg.Cart {
+		if item.State == "pending" {
+			arg.Total += (float32(item.Price) * float32(item.Quantity))
+			Cart = append(Cart, item)
+		}
+	}
+	arg.Cart = Cart
+
+	return nil
+}
+
+// AddCartTx is AddCart, but runs inside tx.
+func (arg *ReceiptLog) AddCartTx(ctx context.Context, tx pgx.Tx) error {
+	sql := `UPDATE salestrace SET cart = $1 WHERE receipt_num = $2`
+
+	cartJSON, err := json.Marshal(arg.Cart)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, sql, string(cartJSON), arg.ReceiptNum)
+	if err != nil {
+		log.Println("postgresql error. failed to add items to cart.     err = ", err)
+		return err
+	}
 
 	return nil
 }

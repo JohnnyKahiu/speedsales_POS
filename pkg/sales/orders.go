@@ -154,14 +154,18 @@ func (ord *Order) NewOrder(ctx context.Context) error {
 		ord.AcNum = fmt.Sprintf("%v", ord.ReceiptNum)
 	}
 
-	// create a new order if there is no active order
+	// See NewOrderTX for why the branch-uniqueness digits are derived from
+	// hashtext(branch) rather than a live branches-table lookup: a scalar
+	// subquery with no matching row is NULL, and CONCAT() silently drops
+	// NULL args as empty string, collapsing order_num uniqueness across
+	// branches instead of erroring.
 	sql := `INSERT INTO salesorders(order_num, daily_count, till_num, poster, branch, company_id, ac_num, receipt_num)
 			SELECT CAST(CONCAT(
-							extract(YEAR FROM now()), 
-							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'), 
-							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'), 
-							(SELECT CONCAT(company_id, branch_id) FROM branches WHERE branch_name = (SELECT branch FROM users WHERE username = $1) LIMIT 1), 
-							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar) 
+							extract(YEAR FROM now()),
+							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'),
+							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'),
+							LPAD((abs(hashtext((SELECT branch FROM users WHERE username = $1))) % 100000)::text, 5, '0'),
+							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar)
 						) AS BIGINT) as order_num
 					, coalesce(max(daily_count), 0) + 1 as daily_count
 					, (SELECT cast(till_num as bigint) FROM users WHERE username = $1) as till_num
@@ -170,9 +174,9 @@ func (ord *Order) NewOrder(ctx context.Context) error {
 					, (SELECT company_id FROM users WHERE username = $1) as company_id
 					, $2
 					, $3
-				FROM salesorders 
-				WHERE trans_date::date = (SELECT now()::date) AND 
-				company_id = (SELECT coalesce(company_id, 0) FROM users WHERE username = $1) AND 
+				FROM salesorders
+				WHERE trans_date::date = (SELECT now()::date) AND
+				company_id = (SELECT coalesce(company_id, 0) FROM users WHERE username = $1) AND
 				branch = (SELECT branch FROM users WHERE username = $1)
 			RETURNING order_num`
 
@@ -214,14 +218,32 @@ func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
 		ord.AcNum = fmt.Sprintf("%v", ord.ReceiptNum)
 	}
 
-	// create a new order if there is no active order
+	// order_num below is derived from coalesce(max(daily_count),0)+1 over
+	// existing salesorders rows for this branch. Without serializing that
+	// read against concurrent inserts, two NewOrderTX calls racing for the
+	// same branch can both compute the same daily_count from their own
+	// snapshot and collide on salesorders_pkey. This lock is released
+	// automatically when the caller's transaction commits or rolls back.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, ord.Branch); err != nil {
+		return err
+	}
+
+	// order_num used to derive its branch-uniqueness digits from a live
+	// lookup against branches (CONCAT(company_id, branch_id)) — but a
+	// scalar subquery with no matching row is NULL, and CONCAT() silently
+	// drops NULL args as empty string. With branches empty (or just missing
+	// this branch_name), that segment collapses for every branch, so any
+	// two different branches' Nth order of the day produced the identical
+	// order_num — not a rare race, a guaranteed collision. Deriving the
+	// segment straight from ord.Branch itself instead means it can never
+	// go missing or empty, regardless of the branches table's state.
 	sql := `INSERT INTO salesorders(order_num, daily_count, till_num, poster, branch, company_id, ac_num, receipt_num)
 			SELECT CAST(CONCAT(
-							extract(YEAR FROM now()), 
-							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'), 
-							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'), 
-							(SELECT CONCAT(coalesce($6, 0), coalesce(branch_id, 0)) FROM branches WHERE branch_name = $1), 
-							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar) 
+							extract(YEAR FROM now()),
+							LPAD(EXTRACT(MONTH FROM now())::text, 2, '0'),
+							LPAD(EXTRACT(DAY FROM now())::text, 2, '0'),
+							LPAD((abs(hashtext($1)) % 100000)::text, 5, '0'),
+							cast(coalesce(max(daily_count), 0) + 1 as varchar), cast(0 as varchar)
 						) AS BIGINT) as order_num
 					, coalesce(max(daily_count), 0) + 1 as daily_count
 					, $2 as till_num
@@ -230,9 +252,8 @@ func (ord *Order) NewOrderTX(ctx context.Context, tx pgx.Tx) error {
 					, $6 as company_id
 					, $4
 					, $5
-				FROM salesorders 
-				WHERE trans_date::date = (SELECT now()::date) 
-					-- AND company_id = $6 
+				FROM salesorders
+				WHERE trans_date::date = (SELECT now()::date)
 					AND branch = $1
 			RETURNING order_num`
 
@@ -294,12 +315,17 @@ func (ord *Order) Fetchtems(ctx context.Context) error {
 	return nil
 }
 
-// FetchOrderItems gets all items in order
+// FetchOrderItems gets all items in order. Only ever called from
+// AddToOrder, mid-transaction — FOR UPDATE locks the row for the rest of
+// that transaction so a concurrent add-item for the same order blocks on
+// the lock instead of reading a stale order_items and clobbering this
+// append on write (the same class of lost-update bug as recordCart).
 func (ord *Order) FetchtemsTX(ctx context.Context, tx pgx.Tx) error {
-	sql := `SELECT 
-				cast(coalesce(order_items::varchar, '[]') as varchar) 
-			FROM salesorders 
-			WHERE order_num = $1`
+	sql := `SELECT
+				cast(coalesce(order_items::varchar, '[]') as varchar)
+			FROM salesorders
+			WHERE order_num = $1
+			FOR UPDATE`
 
 	rows, err := tx.Query(ctx, sql, ord.OrderNum)
 	if err != nil {
@@ -409,7 +435,7 @@ func (arg *ReceiptLog) CombineOrdersInBill(ctx context.Context, tx pgx.Tx) error
 	sql := `SELECT 
 				cast(coalesce(order_items, '[]') as varchar) 
 			FROM salesorders 
-			WHERE state in ('dispatched') AND receipt_num = $1`
+			WHERE state in ('ordered', 'dispatched') AND receipt_num = $1`
 
 	// var values []Sales
 	rows, err := tx.Query(ctx, sql, arg.ReceiptNum)
@@ -446,9 +472,9 @@ func FetchActiveOrders(ctx context.Context, poster string) ([]Order, error) {
 	// 	return nil, err
 	// }
 
-	// state := `'pending', 'dispatched', 'paying'`
+	// state := `'pending', 'ordered', 'dispatched', 'paying'`
 	// if userDetails.AcceptPayment {
-	// 	state = `'pending', 'dispatched', 'paying'`
+	// 	state = `'pending', 'ordered', 'dispatched', 'paying'`
 	// }
 
 	sql := `SELECT
@@ -457,7 +483,7 @@ func FetchActiveOrders(ctx context.Context, poster string) ([]Order, error) {
 				, state
 				, ac_num
 			FROM salesorders
-			WHERE state IN ('pending', 'dispatched', 'paying') AND till_num = (SELECT cast(till_num as bigint) FROM users WHERE username = $1)
+			WHERE state IN ('pending', 'ordered', 'dispatched', 'paying') AND till_num = (SELECT cast(till_num as bigint) FROM users WHERE username = $1)
 			ORDER BY trans_date ASC
 			`
 
@@ -495,7 +521,7 @@ func FetchActiveOrdersInBill(ctx context.Context, receipt string) ([]Order, erro
 				, receipt_num
 			FROM salesorders
 			WHERE
-				state IN ('pending', 'dispatched', 'paying') AND
+				state IN ('pending', 'ordered', 'dispatched', 'paying') AND
 				receipt_num = $1
 			ORDER BY trans_date ASC
 			`
@@ -670,6 +696,10 @@ func (ord *Order) CompleteOrder(ctx context.Context) ([]OrderItem, error) {
 
 	// if kitchen is enabled complete order state should be    'ordered'
 	// else  state = 'dispatched'
+	// There's no kitchen dispatch-acknowledgment step that ever promotes
+	// 'ordered' to 'dispatched', so every query that treats 'dispatched' as
+	// active/billable must also treat 'ordered' that way, or orders placed
+	// while kitchen dispatch is enabled silently vanish at bill-close time.
 	ord.State = "ordered"
 	if !variables.ProductionDisp {
 		ord.State = "dispatched"
@@ -792,7 +822,7 @@ func (ord *Order) GetOrdersInBills(ctx context.Context) ([]Order, error) {
 				, order_items::varchar
 			FROM salesorders 
 			WHERE 
-				state IN ('pending', 'dispatched', 'paying') AND 
+				state IN ('pending', 'ordered', 'dispatched', 'paying') AND 
 				receipt_num = $1
 			ORDER BY trans_date ASC `
 
@@ -1313,7 +1343,7 @@ func (arg *ReceiptLog) UpdateCart(ctx context.Context, tx pgx.Tx) error {
 }
 
 func (arg *ReceiptLog) CloseOrders(ctx context.Context, tx pgx.Tx) error {
-	sql := "UPDATE salesorders SET state = 'paying' WHERE receipt_num = $1 AND state = 'dispatched'"
+	sql := "UPDATE salesorders SET state = 'paying' WHERE receipt_num = $1 AND state IN ('ordered', 'dispatched')"
 
 	_, err := tx.Exec(ctx, sql, arg.ReceiptNum)
 	if err != nil {

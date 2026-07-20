@@ -132,20 +132,12 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
-		// log.Println("branch =", details.Branch)
-		branch := details.Branch
-		if branch == "" {
-			branch = "Main"
-		}
-
 		stkLoc := details.StkLocation
 		if stkLoc == "" {
 			stkLoc = "Store"
 		}
 
-		// log.Printf("\t branch = '%s'", branch)
 		ord := sales.Order{
-			Branch:      branch,
 			StkLocation: stkLoc,
 			CompanyID:   details.CompanyID,
 			Poster:      details.Username,
@@ -159,6 +151,10 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			respMap["trace"] = err
 			return respMap
 		}
+		// Only a branch-less/"all" user's own request may pick the branch
+		// (via the frontend's operating-branch modal) — a fixed-branch
+		// cashier's branch always wins, no matter what the body says.
+		ord.Branch = details.ResolveBranch(ord.Branch)
 
 		// add item to cart
 		cart, total, err := ord.AddToOrder(r.Context(), ord.OrderItems[0])
@@ -214,15 +210,11 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			return respMap
 		}
 
-		branch := details.Branch
-		if branch == "" {
-			branch = "Main"
-		}
 		stkLoc := details.StkLocation
 		if stkLoc == "" {
 			stkLoc = "Store"
 		}
-		ord := sales.Order{Branch: branch, StkLocation: stkLoc}
+		ord := sales.Order{StkLocation: stkLoc}
 		err = json.Unmarshal(b, &ord)
 		if err != nil {
 			log.Println("failed to unmarshal body    err =", err)
@@ -231,6 +223,9 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			respMap["trace"] = err
 			return respMap
 		}
+		// See add-cart above: only a branch-less/"all" user's own request
+		// may pick the branch.
+		ord.Branch = details.ResolveBranch(ord.Branch)
 
 		cart, err := ord.CompleteOrder(r.Context())
 		if err != nil {
