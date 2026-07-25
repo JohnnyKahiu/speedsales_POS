@@ -60,18 +60,26 @@ func genReceiptTbl() error {
 	return database.CreateFromStruct(tblStruct)
 }
 
-func (arg *ReceiptLog) CheckIfExists(ctxt context.Context) error {
+func (arg *ReceiptLog) CheckIfExists(ctxt context.Context, suspend bool) error {
 	ctx, cancel := context.WithTimeout(ctxt, 15*time.Second)
 	defer cancel()
 
-	sql := `
+	suspCond := ""
+	if suspend {
+		suspCond = `
+			AND (cart::varchar = '' OR cart::varchar IS NULL )
+    		AND (o.order_items::varchar = '' OR o.order_items IS NULL) `
+	}
+
+	sql := fmt.Sprintf(`
 			SELECT 
 				coalesce(max(receipt_num), 0) 
-			FROM salestrace 
-			WHERE state in ('pending', 'paying')
-				AND till_num = $1
-				AND sale_type = $2
-				AND cust_name = $3`
+			FROM salestrace s LEFT JOIN salesorders o ON s.receipt_num = o.receipt_num
+			WHERE s.state in ('pending', 'paying')
+				AND s.till_num = $1
+				AND s.sale_type = $2
+				AND s.cust_name = $3
+				%v `, suspCond)
 
 	// Query database rows
 	if err := database.PgPool.QueryRow(ctx, sql, arg.TillNum, arg.SaleType, arg.CustName).Scan(&arg.ReceiptNum); err != nil {
@@ -101,7 +109,7 @@ func (arg *ReceiptLog) GenReceipt(ctxt context.Context) error {
 	}
 
 	// fetch next open receipt if exists
-	if err = arg.CheckIfExists(ctxt); err != nil {
+	if err = arg.CheckIfExists(ctxt, false); err != nil {
 		return errors.New("pg error. failed checking error")
 	}
 	fmt.Println("Gen Receipt num =", arg.ReceiptNum)
@@ -923,24 +931,47 @@ func (arg *ReceiptLog) Analyze(ctx context.Context) error {
 }
 
 func (arg *ReceiptLog) GetPayingRcpts(ctxt context.Context) ([]ReceiptLog, error) {
-	sql := `SELECT
-				sm.trans_date at time zone 'utc' at time zone 'eat' trans_date
-				, sm.till_num
-				, sm.receipt_num
-				, sm.branch
-				, sm.poster
-				, total
-				, coalesce(cart::varchar, '[{}]')
-				, state
-				, coalesce(cust_name, 'walk_in')
-			FROM salestrace as sm
-			WHERE state in ('paying', 'pending payment') AND branch = $1
-			ORDER BY last_updated ASC`
+	// Users with no fixed branch (empty or "all") can see paying receipts across
+	// all branches (they are typically supervisors / cashiers-office staff).
+	var sql string
+	var args []interface{}
+	if arg.Branch == "" || arg.Branch == "all" {
+		sql = `SELECT
+					sm.trans_date at time zone 'utc' at time zone 'eat' trans_date
+					, sm.till_num
+					, sm.receipt_num
+					, sm.branch
+					, sm.poster
+					, total
+					, coalesce(cart::varchar, '[{}]')
+					, state
+					, coalesce(cust_name, 'walk_in')
+				FROM salestrace as sm
+				WHERE state in ('paying', 'pending payment')
+				ORDER BY last_updated ASC`
+	} else {
+		sql = `SELECT
+					sm.trans_date at time zone 'utc' at time zone 'eat' trans_date
+					, sm.till_num
+					, sm.receipt_num
+					, sm.branch
+					, sm.poster
+					, total
+					, coalesce(cart::varchar, '[{}]')
+					, state
+					, coalesce(cust_name, 'walk_in')
+				FROM salestrace as sm
+				WHERE state in ('paying', 'pending payment') AND branch = $1
+				ORDER BY last_updated ASC`
+		args = append(args, arg.Branch)
+	}
+
+	fmt.Println("sql =", sql)
 
 	ctx, cancel := context.WithTimeout(ctxt, 20*time.Second)
 	defer cancel()
 
-	rows, err := database.PgPool.Query(ctx, sql, arg.Branch)
+	rows, err := database.PgPool.Query(ctx, sql, args...)
 	if err != nil {
 		log.Println("failed to query paying receipts    err =", err)
 		return nil, err

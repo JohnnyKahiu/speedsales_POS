@@ -344,32 +344,30 @@ func GetReceipt(ctxt context.Context, receipt string) (Payment, error) {
 	return pay, nil
 }
 
-// GetTaxBreak
+// GetTaxBreak computes VAT breakdown per vat_alpha group from the committed cart.
 func (pay *Payment) GetTaxBreak(ctxt context.Context) error {
-	sql := `SELECT 
-				s.vat_alpha code
-				, min(s.vat_perc) rate
-				, SUM(vat) vat
-				, sum((quantity*price)-vat) as vatable 
-			FROM (SELECT 
-						sales.*, s.poster served_by, s.last_updated trans_complete_time
-					FROM salestrace s, jsonb_to_recordset(s.cart) as 
-						sales (
-							trans_date timestamptz
-							, item_code text
-							, item_name text
-							, vat_alpha text
-							, vat_perc float
-							, vat float
-							, quantity float
-							, price float
-							, cost float
-							, receipt_num bigint
-							, state text
+	// Filter on sales.state (JSONB item state) not s.state (receipt state).
+	// Column order: vat_alpha, perc (float), vatable, vat — must match Scan below.
+	sql := `SELECT
+				s.vat_alpha
+				, min(s.vat_perc)
+				, sum((s.quantity * s.price) - s.vat) AS vatable
+				, SUM(s.vat) AS vat
+			FROM (
+				SELECT sales.vat_alpha, sales.vat_perc, sales.vat, sales.quantity, sales.price
+				FROM salestrace st, jsonb_to_recordset(st.cart) AS
+					sales (
+						vat_alpha text
+						, vat_perc  float
+						, vat       float
+						, quantity  float
+						, price     float
+						, state     text
 					)
-					WHERE s.receipt_num = $1 AND s.state NOT IN ('DELETED', 'VOIDED')
-				) s
-			GROUP BY s.vat_alpha`
+				WHERE st.receipt_num = $1 AND sales.state = 'pending'
+			) s
+			GROUP BY s.vat_alpha
+			ORDER BY s.vat_alpha`
 
 	ctx, cancel := context.WithTimeout(ctxt, 20*time.Second)
 	defer cancel()
@@ -382,27 +380,24 @@ func (pay *Payment) GetTaxBreak(ctxt context.Context) error {
 
 	var vals []map[string]interface{}
 	for rows.Next() {
-		var alpha, perc string
-		var vatable, vat float64
+		var alpha string
+		var perc, vatable, vat float64
 
-		err = rows.Scan(&alpha, &perc, &vatable, &vat)
-		if err != nil {
+		if err = rows.Scan(&alpha, &perc, &vatable, &vat); err != nil {
 			log.Println("error scanning tax sum err =", err)
+			continue
 		}
 
-		r := make(map[string]interface{})
-
-		r["vat_alpha"] = alpha
-		r["perc"] = perc
-		r["vatable"] = vatable
-		r["vat"] = vat
-
-		vals = append(vals, r)
+		vals = append(vals, map[string]interface{}{
+			"vat_alpha": alpha,
+			"perc":      perc,
+			"vatable":   vatable,
+			"vat":       vat,
+		})
 	}
 	pay.Tax = vals
 
 	fmt.Println("tax breakdown = ", pay.Tax)
-
 	return nil
 }
 

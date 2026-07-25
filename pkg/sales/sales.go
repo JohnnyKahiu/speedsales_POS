@@ -141,6 +141,10 @@ func (arg *ReceiptLog) CreateReceipt(ctx context.Context) (int64, error) {
 		arg.PayTill = userDetails.TillNum
 	}
 
+	if err := arg.CheckIfExists(ctx, false); err != nil {
+		return 0, err
+	}
+
 	// prepare sql statement to get the next receipt number
 	sql := `SELECT CAST(CONCAT(
 						cast(1 as varchar)

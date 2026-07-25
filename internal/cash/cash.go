@@ -321,13 +321,13 @@ func Post(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 			CustName:  custName,
 		}
 
-		err := receipt.GenReceipt(r.Context())
-		if err != nil {
-			log.Println("gen_receipt error     err =", err)
+		// Always create a fresh receipt — skip CheckIfExists so that multiple
+		// walk-in tabs can coexist (required for restaurant multi-tab mode).
+		if _, err := receipt.CreateReceipt(r.Context()); err != nil {
+			log.Println("new_bill CreateReceipt error     err =", err)
 			respMap["response"] = "error"
-			respMap["message"] = "receipt number is null"
+			respMap["message"] = "failed to create new receipt"
 			respMap["trace"] = err
-
 			return respMap
 		}
 
